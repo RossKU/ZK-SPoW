@@ -6,7 +6,7 @@
 
 ## 1. Abstract
 
-We propose replacing Kaspa's kHeavyHash proof-of-work function with Poseidon2 over the Mersenne field M31, the same algebraic hash function used internally by the Stwo STARK prover. By extending the Poseidon2 permutation width from 16 to 20 elements and operating in compression function mode, every Poseidon2 invocation accepts a Merkle child pair plus block\_header as input and simultaneously produces a valid PoW ticket. This unification means that a mining ASIC and a ZK prover share identical Poseidon2 cores — a property we call **ZK-Symbiotic Proof of Work**. The same hardware performs both network security (PoW) and useful computation (ZK proofs) with zero-overhead switching and no hashrate degradation in either mode. We show this design is Pareto-optimal and constitutes a Nash equilibrium among rational miners in a mature ZK fee market.
+We propose replacing Kaspa's kHeavyHash proof-of-work function with Poseidon2 over the Mersenne field M31, the same algebraic hash function used internally by the Stwo STARK prover. By extending the Poseidon2 permutation width from 16 to 24 elements and operating in compression function mode, every Poseidon2 invocation accepts a Merkle child pair plus block\_header as input and simultaneously produces two independent PoW tickets. This unification means that a mining ASIC and a ZK prover share identical Poseidon2 cores — a property we call **ZK-Symbiotic Proof of Work**. The same hardware performs both network security (PoW) and useful computation (ZK proofs) with zero-overhead switching and no hashrate degradation in either mode. We show this design is Pareto-optimal and constitutes a Nash equilibrium among rational miners in a mature ZK fee market.
 
 ---
 
@@ -34,7 +34,7 @@ The key insight: ZK proof computation *is* work. When an ASIC runs the Stwo prov
 
 Kaspa is evaluating StarkWare's **Stwo** [4] as a potential STARK backend for verifiable programs (vProgs). Stwo operates over the Mersenne field M31 and uses **Poseidon2** [3] as its internal hash function for Merkle tree commitments and Fiat-Shamir challenges.
 
-This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — is *identical* to what is needed for STARK proof generation. Mining hardware becomes ZK proving hardware, with the only additional cost being a Poseidon2 width extension from 16 to 20 elements (~+11% die area, see §4.2).
+This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — is *identical* to what is needed for STARK proof generation. Mining hardware becomes ZK proving hardware, with the only additional cost being a Poseidon2 width extension from 16 to 24 elements (~+22% die area, see §4.2).
 
 ---
 
@@ -50,7 +50,7 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 | n | Hash output size in field elements (n = 8, giving 248 bits) |
 | H | Block header: (parent\_hashes, tx\_merkle\_root, timestamp) |
 | h\_H | Header hash: PoseidonSponge(H) ∈ F\_p^k |
-| k | Header hash element count (k ≥ 4 for collision resistance) |
+| k | Header hash element count (k = 8 for symmetric I/O and dual PoW tickets) |
 | (v\_1, v\_2) | Nonce: v\_1, v\_2 ∈ F\_p^8 |
 | T | Target ∈ F\_p^8 (difficulty-adjusted) |
 | S | Poseidon2 state after permutation, S ∈ F\_p^t |
@@ -86,15 +86,16 @@ where M is a 64×64 matrix (generated from header, full-rank over nibbles), nonc
 **Proposed (Poseidon2-PoW):**
 
 ```
-h_H = PoseidonSponge(H)                          // header pre-hash (4 M31 elements)
-S   = Poseidon2_π(v₁ || v₂ || h_H)              // single permutation, width 20
-pow_hash = (S[8], S[9], ..., S[15])               // 8 M31 elements = 248 bits
-valid iff pow_hash < target                        // lexicographic comparison
+h_H = PoseidonSponge(H)                          // header pre-hash (8 M31 elements)
+S   = Poseidon2_π(v₁ || v₂ || h_H)              // single permutation, width 24
+pow_hash₁ = (S[8], S[9], ..., S[15])              // 8 M31 elements = 248 bits
+pow_hash₂ = (S[16], S[17], ..., S[23])            // 8 M31 elements = 248 bits
+valid iff pow_hash₁ < target OR pow_hash₂ < target
 ```
 
-where (v₁, v₂) are 8 M31 elements each (64 bytes total nonce). The permutation operates in **compression function mode** — all 20 input elements are visible (no hidden capacity). This differs from Stwo's standard sponge mode (width 16, rate 8, capacity 8) but is a recommended Poseidon2 usage mode [3].
+where (v₁, v₂) are 8 M31 elements each (64 bytes total nonce). The permutation operates in **compression function mode** — all 24 input elements are visible (no hidden capacity). This differs from Stwo's standard sponge mode (width 16, rate 8, capacity 8) but is a recommended Poseidon2 usage mode [3]. Each permutation produces **two independent PoW tickets**, doubling the effective hashrate per permutation.
 
-**Verification cost:** One Poseidon2 permutation (width 20) + one header pre-hash (amortized over all nonce attempts per header).
+**Verification cost:** One Poseidon2 permutation (width 24) + two target comparisons + one header pre-hash (amortized).
 
 ### 4.2 Poseidon2 Width Extension
 
@@ -121,85 +122,86 @@ Total: 2 permutations per Merkle hash
 
 #### 4.2.2 Design Alternatives
 
-Three approaches to integrate header\_hash[4] into the Merkle hash:
+Three approaches to integrate header\_hash into the Merkle hash:
 
-| Design | Width | Mode | Perm/hash | Core area Δ | Die area Δ |
-|--------|-------|------|-----------|-------------|------------|
-| A: 3rd absorb | 16 | Sponge | 3 (+50%) | 0% | 0% |
-| **B: Width 20** | **20** | **Compression** | **1** | **+22%** | **~+11%** |
-| C: Width 24 | 24 | Compression | 1 | +48% | ~+24% |
+| Design | Width | Mode | Perm/hash | PoW tickets | Core area Δ | Die area Δ |
+|--------|-------|------|-----------|-------------|-------------|------------|
+| A: 3rd absorb | 16 | Sponge | 3 (+50%) | 1 | 0% | 0% |
+| B: Width 20 | 20 | Compression | 1 | 1 (+4 wasted) | +22% | ~+11% |
+| **C: Width 24** | **24** | **Compression** | **1** | **2** | **+44%** | **~+22%** |
 
-**Design A:** No Poseidon2 modification. Standard width-16 sponge with 3 absorptions (left, right, header). +50% permutations per hash, reducing both PoW and ZK throughput by 33%.
+**Design A:** No Poseidon2 modification. Standard width-16 sponge with 3 absorptions (left, right, header[4]). +50% permutations per hash, reducing both PoW and ZK throughput by 33%.
 
-**Design B (selected):** Extend permutation to width 20. Compression function mode — all 20 elements are input, all 20 are output. **1 permutation per hash.** +22% core area, ~+11% total die area.
+**Design B:** Extend to width 20 with header\_hash[4]. Compression function mode, 1 permutation per hash. But 4 output elements are unused (asymmetric 8+8+4 I/O).
 
-**Design C:** Width 24 with maximum margin. Strongest security argument but +48% core area and ~+24% die impact.
+**Design C (selected):** Extend to width 24 with header\_hash[8]. Symmetric 8+8+8 I/O — all output elements are useful. **2 PoW tickets per permutation** (S[8..15] and S[16..23]), yielding +67% effective hashrate over Design B despite 17% fewer cores. Header hash security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3].
 
-#### 4.2.3 Proposed Extension (Design B)
+#### 4.2.3 Proposed Extension (Design C)
 
 ```
 Standard Stwo:    Width t₀ = 16,  Sponge (rate 8, capacity 8)
-Proposed ZK-PoUW: Width t  = 20,  Compression function (all 20 visible)
+Proposed ZK-PoUW: Width t  = 24,  Compression function (all 24 visible)
 ```
 
 **Impact on Poseidon2 internals:**
 
-| Component | Width 16 (standard) | Width 20 (proposed) | Change |
+| Component | Width 16 (standard) | Width 24 (proposed) | Change |
 |-----------|--------------------|--------------------|--------|
-| External MDS | 4 M4 blocks (additions) | 5 M4 blocks (additions) | +25% additions |
-| Internal MDS | 16 multiplications (diag + 1·1^T) | 20 multiplications | +25% multiplications |
-| S-box (external) | 16 per round | 20 per round | +25% |
+| External MDS | 4 M4 blocks (additions) | 6 M4 blocks (additions) | +50% additions |
+| Internal MDS | 16 multiplications (diag + 1·1^T) | 24 multiplications | +50% multiplications |
+| S-box (external) | 16 per round | 24 per round | +50% |
 | S-box (internal) | 1 per round | 1 per round | unchanged |
-| State registers | 16 × 31 = 496 bits | 20 × 31 = 620 bits | +25% |
+| State registers | 16 × 31 = 496 bits | 24 × 31 = 744 bits | +50% |
 
 Internal round MDS scales as O(t), not O(t²), because the sparse MDS structure (diagonal + rank-1) requires only t multiplications per round. This makes the width extension significantly cheaper than for standard Poseidon.
 
-**Core area overhead: +22%.** Total die area impact: **~+11%** (Poseidon2 is 50% of die; see Appendix A).
+**Core area overhead: +44%.** Total die area impact: **~+22%** (Poseidon2 is 50% of die; see Appendix A). However, the 2-ticket property yields **+67% effective hashrate** — more than compensating for the larger core area.
 
 #### 4.2.4 Compression Function vs Sponge
 
-Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal uses **compression function mode** where all 20 state elements are visible. Key differences:
+Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal uses **compression function mode** where all 24 state elements are visible. Key differences:
 
 | Property | Sponge (Stwo) | Compression (ZK-PoUW) |
 |----------|--------------|----------------------|
 | Hidden state | 8 capacity elements | None (all visible) |
 | Security model | Indifferentiability | Collision/preimage resistance of π |
 | Permutations per Merkle hash | 2 | **1** |
-| Width | 16 | 20 |
+| Width | 16 | 24 |
+| PoW tickets per hash | 0 | **2** |
 
-Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper explicitly recommends compression function mode for Merkle tree computations, noting up to 5× efficiency over sponge mode. Width-20 compression over M31 requires dedicated security analysis (see §7.3, §9).
+Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper explicitly recommends compression function mode for Merkle tree computations, noting up to 5× efficiency over sponge mode. Width 24 is within the Poseidon2 paper's analyzed parameter range, though compression function mode over M31 requires dedicated security review (see §7.3, §9).
 
 ### 4.3 I/O Mapping
 
-For a single Poseidon2 permutation with state S ∈ F\_p^20 (compression function mode):
+For a single Poseidon2 permutation with state S ∈ F\_p^24 (compression function mode):
 
 ```
-INPUT (20 elements, all visible):
+INPUT (24 = 8+8+8, all visible):
   S[0..7]    ← left_child     8 M31 elements (248 bits)
   S[8..15]   ← right_child    8 M31 elements (248 bits)
-  S[16..19]  ← header_hash    4 M31 elements (124 bits)
+  S[16..23]  ← header_hash    8 M31 elements (248 bits)
 
           ┌──────────────────────────────────┐
-          │   Poseidon2 permutation (t = 20) │
+          │   Poseidon2 permutation (t = 24) │
           │   R_f = 8 external + R_p = 14 int│
           └──────────────────────────────────┘
 
-OUTPUT (20 elements, all visible):
+OUTPUT (24 = 8+8+8, all visible):
   S[0..7]    → merkle_node    STARK Merkle parent node (useful)
-  S[8..15]   → pow_hash       PoW target comparison (248 bits)
-  S[16..19]  → extra          additional PoW tickets (optional)
+  S[8..15]   → pow_hash₁      PoW ticket 1 (248 bits)
+  S[16..23]  → pow_hash₂      PoW ticket 2 (248 bits)
 ```
 
-No capacity elements exist — compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and preimage resistance properties rather than sponge indifferentiability (see §4.2.4).
+Symmetric 8+8+8 I/O with zero waste. No capacity elements — compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and PRP properties (see §4.2.4).
 
 **Dual-use property:**
 
-| Mode | S[0..7] input | S[8..15] input | S[16..19] input | S[0..7] output | S[8..15] output |
-|------|--------------|---------------|----------------|---------------|----------------|
-| STARK (PoUW) | Merkle left child | Merkle right child | header\_hash | Merkle parent (useful) | PoW ticket |
-| Pure PoW | Random v₁ | Random v₂ | header\_hash | (discarded) | PoW ticket |
+| Mode | S[0..7] in | S[8..15] in | S[16..23] in | S[0..7] out | S[8..15] out | S[16..23] out |
+|------|-----------|------------|-------------|-----------|-------------|--------------|
+| STARK (PoUW) | left child | right child | header\_hash | merkle parent | PoW ticket₁ | PoW ticket₂ |
+| Pure PoW | v₁ | v₂ | header\_hash | (discarded) | PoW ticket₁ | PoW ticket₂ |
 
-The same Poseidon2 hardware computes both modes. Only the input source for S[0..15] differs (SRAM Merkle data vs random nonces). S[16..19] is always header\_hash.
+The same Poseidon2 hardware computes both modes. Only the input source for S[0..15] differs (SRAM Merkle data vs random nonces). S[16..23] is always header\_hash. **Each permutation produces 2 independent PoW tickets**, doubling effective hashrate.
 
 ### 4.4 Block Structure
 
@@ -238,7 +240,7 @@ The header hash h\_H compresses the variable-length block header into k field el
 | 4 | 124 | 2^62 ≈ 4.6 × 10^18 | SECURE |
 | 8 | 248 | 2^124 | Overkill |
 
-**Minimum: k = 4** (124-bit collision resistance). This determines the width extension: t = 16 + 4 = 20.
+**Minimum: k = 4** (124-bit collision resistance). We choose **k = 8** (248-bit, matching PoW hash size) to enable symmetric 8+8+8 I/O and 2 PoW tickets per permutation. Width extension: t = 16 + 8 = 24.
 
 ---
 
@@ -259,11 +261,12 @@ When ZK proof demand exists, the ASIC runs the Stwo prover. The STARK proof gene
 At step 3, every Merkle hash is:
 
 ```
-S = Poseidon2_π(n_L || n_R || h_H)       // width 20, compression function
+S = Poseidon2_π(n_L || n_R || h_H)       // width 24, compression function
 merkle_parent = S[0..7]       ← advances STARK proof (useful)
-pow_ticket    = S[8..15]      ← checked against PoW target (security)
+pow_ticket₁   = S[8..15]      ← checked against PoW target (security)
+pow_ticket₂   = S[16..23]     ← checked against PoW target (security)
 
-if pow_ticket < target → BLOCK FOUND
+if pow_ticket₁ < target OR pow_ticket₂ < target → BLOCK FOUND
 ```
 
 Every Poseidon2 invocation in the STARK computation simultaneously:
@@ -280,8 +283,8 @@ When no ZK proofs are requested:
 loop:
   v₁ = next_nonce_1()
   v₂ = next_nonce_2()
-  S = Poseidon2_π(v₁ || v₂ || h_H)       // width 20, compression function
-  if S[8..15] < target → BLOCK FOUND
+  S = Poseidon2_π(v₁ || v₂ || h_H)       // width 24, compression function
+  if S[8..15] < target OR S[16..23] < target → BLOCK FOUND
 ```
 
 Identical Poseidon2 pipeline, identical throughput. The only difference is the input source: random/sequential nonces instead of STARK Merkle children.
@@ -327,7 +330,7 @@ The simultaneous execution of PoW and STARK is possible because they bottleneck 
 
 | Resource | PoW | STARK | Combined |
 |----------|-----|-------|----------|
-| Poseidon2 cores | **100%** (compute-bound) | ~7% (data-starved) | **~100%** |
+| Poseidon2 cores | **100%** (compute-bound) | ~8% (data-starved) | **~100%** |
 | NTT unit | 0% (unused) | **100%** | **100%** |
 | SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
 
@@ -456,18 +459,19 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 | 12 | Sponge | Plonky2 | Well analyzed |
 | 16 | Sponge | **Stwo (standard)** | Analyzed by StarkWare |
 | 16 | Compression | Various Merkle trees | Analyzed (recommended by [3]) |
-| **20** | **Compression** | **This proposal** | **Not yet analyzed** |
+| **24** | **Compression** | **This proposal** | **Width analyzed; compression mode needs review** |
 
-**Required:** Commission dedicated security analysis for Poseidon2 with t = 20 over M31 in **compression function mode**, covering:
+**Required:** Commission dedicated security analysis for Poseidon2 with t = 24 over M31 in **compression function mode**, covering:
 - Algebraic attack resistance (Gröbner basis complexity bounds)
 - Differential and linear cryptanalysis
-- Round number adequacy (R\_f = 8, R\_p = 14) for width 20
-- MDS matrix security properties for the 20×20 case
+- Round number adequacy (R\_f = 8, R\_p = 14) for width 24
+- MDS matrix security properties for the 24×24 case
 - Compression function mode security (all state elements visible, no hidden capacity)
+- Independence of dual PoW tickets (S[8..15] and S[16..23] from same permutation)
 
 ### 7.4 PoW Hash Distribution
 
-The pow\_hash = S[8..15] is part of the full permutation output. In compression function mode, all state elements are visible by design — there are no hidden capacity elements. Security relies on the Poseidon2 permutation's pseudorandom properties: given a random-looking input, the output should be indistinguishable from random. Using S[8..15] as the PoW hash while S[0..7] serves as the Merkle parent does not leak exploitable information, as the full-round permutation ensures all output elements are cryptographically mixed.
+Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The two PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict pow₂ from pow₁ without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 14 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
 
 ### 7.5 Quantum Resistance
 
@@ -507,10 +511,11 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 | STARK proof in block? | **No** (Option C) | Eliminates +3–5 MB/s bandwidth at 100 BPS |
 | Hash function | **Poseidon2** | Stwo compatibility |
 | Field | **M31** | Stwo standard (smallest multiplier, highest core density) |
-| Permutation width | **20** (extended from 16) | Accommodates header\_hash[4]; +22% core, ~+11% die |
+| Permutation width | **24** (extended from 16) | Symmetric 8+8+8 I/O; 2 PoW tickets; +44% core, ~+22% die |
 | Operating mode | **Compression function** | 1 permutation/hash (vs 2 in sponge); recommended by [3] |
+| PoW tickets per hash | **2** | S[8..15] and S[16..23]; +67% effective hashrate |
 | PoW hash size | **248 bits** (8 M31 elements) | Close to 256-bit kHeavyHash/Bitcoin class (8-bit reduction) |
-| Header hash elements | **4** (124 bits) | Birthday bound 2^62 (secure) |
+| Header hash elements | **8** (248 bits) | Birthday bound 2^124; matches PoW hash size |
 | STARK enforcement | **None** | Market-driven ZK adoption; avoids bandwidth penalty |
 | Nonce structure | **(v₁, v₂)** each 8 elements | 64 bytes, maps to Merkle child pair in STARK mode |
 
@@ -540,7 +545,7 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are still placeholders. Final production constants may affect security margins.
 
-2. **Width 20 compression function security analysis.** No published cryptanalysis exists for Poseidon2 at t = 20 over M31 in compression function mode. This analysis is a prerequisite for deployment, covering algebraic attacks, round number adequacy, and the absence of hidden capacity elements.
+2. **Width 24 compression function security analysis.** Width 24 Poseidon2 has been analyzed in sponge mode, but compression function mode (all 24 elements visible) over M31 requires dedicated review. This analysis is a prerequisite for deployment, covering algebraic attacks, round number adequacy, and the dual-ticket independence property.
 
 3. **Hard fork governance.** Transitioning from kHeavyHash to Poseidon2 renders existing kHeavyHash ASICs obsolete and requires community consensus.
 
@@ -550,9 +555,11 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 6. **Complementary bottleneck validation.** The claim that PoW (compute-bound) and STARK (memory-bound) can run simultaneously at full throughput requires hardware-level validation on actual ASIC designs.
 
-7. **Compression function security.** This proposal uses Poseidon2 in compression function mode (all 20 state elements visible), unlike Stwo's standard sponge mode (8 capacity elements hidden). While compression mode is recommended by the Poseidon2 paper [3] and widely used for Merkle trees, the specific configuration (width 20 over M31, no capacity) requires dedicated security analysis.
+7. **Compression function security.** This proposal uses Poseidon2 in compression function mode (all 24 state elements visible), unlike Stwo's standard sponge mode (8 capacity elements hidden). While compression mode is recommended by the Poseidon2 paper [3] and widely used for Merkle trees, the specific configuration (width 24 over M31, no capacity, dual PoW tickets) requires dedicated security analysis.
 
-8. **Stwo verifier compatibility.** Standard Stwo verifiers using width-16 sponge cannot directly verify commitments produced by the width-20 compression function. A modified Stwo configuration or adapter layer is required for ZK-PoUW integration.
+8. **Stwo verifier compatibility.** Standard Stwo verifiers using width-16 sponge cannot directly verify commitments produced by the width-24 compression function. A modified Stwo configuration or adapter layer is required for ZK-PoUW integration.
+
+9. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
 
 ---
 
