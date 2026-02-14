@@ -275,12 +275,16 @@ With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles se
 ### A.6.1 kHeavyHash Core
 
 ```
-cSHAKE256 hash (×2):        ~50K gates (Keccak-f[1600] based)
+cSHAKE256 hash (×2):        ~80K gates (2× Keccak-f[1600], ~40K each, mid-pipeline)
 64×64 nibble matrix mul:    ~65K gates (integer matmul + XOR)
 Control:                     ~5K gates
 ─────────────────────────────────────
-Total:                      ~120K gates per core
+Total:                      ~150K gates per core
 Throughput:                 ~1G hashes/sec per core @ 1GHz
+
+Note: Keccak-f[1600] gate counts range from ~12K (compact/folded) to ~120K
+(fully pipelined). The ~40K estimate assumes a mid-pipeline design (4–8
+round stages) balancing area and throughput for ASIC mining.
 ```
 
 ### A.6.2 Poseidon2-PoW Core (M31, Width 24, Full Pipeline)
@@ -305,14 +309,14 @@ Throughput:                  ~1G perm/sec → 2G effective hash/sec (2 tickets) 
 
 | Metric | kHeavyHash ASIC | Poseidon2-PoW ASIC (Width 24) |
 |--------|----------------|-------------------------------|
-| Core area | 120K gates | ~1.2M gates |
-| Cores (60M gate die) | ~475 (95% utilized) | ~25 (50% allocated) |
+| Core area | ~150K gates | ~1.2M gates |
+| Cores (60M gate die) | ~380 (95% utilized) | ~25 (50% allocated) |
 | Throughput per core | ~1G/s | ~1G perm/s → 2G eff/s (2 tickets) |
-| Total chip hashrate | ~475G/s | ~50G/s effective |
+| Total chip hashrate | ~380G/s | ~50G/s effective |
 | ZK proof capability | None | ~260 proofs/sec |
 | Additional components | None | NTT, SRAM, controller |
 
-Poseidon2 has ~10× lower PoW hashrate per die than kHeavyHash. **This is absorbed by difficulty adjustment** — all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
+Poseidon2 has ~7.6× lower PoW hashrate per die than kHeavyHash. **This is absorbed by difficulty adjustment** — all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
 
 ---
 

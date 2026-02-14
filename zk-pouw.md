@@ -346,7 +346,7 @@ Four designs compared under identical die area and power budget:
 
 | Design | Die allocation | Hashrate | ZK Throughput | U | Can mine? |
 |--------|---------------|----------|--------------|---|-----------|
-| Pure PoW | 95% Poseidon2, 5% control | ~1.9 H (die area) | 0 | 0% | Yes |
+| Pure PoW | 95% Poseidon2, 5% control | ~1.9 H (die area: 95/50) | 0 | 0% | Yes |
 | Pure Stwo | 20% Poseidon2, 40% NTT, 35% SRAM | 0 | Z\_max | 100% | No |
 | **ZK-PoUW** | **50% Poseidon2, 25% NTT, 20% SRAM** | **H** | **Z** | **100%** | **Yes** |
 | ZK-PoUW+HBM | 50% Poseidon2, 25% NTT, 20% HBM I/F | H | Z\_hbm | 100% | Yes |
@@ -372,18 +372,20 @@ Revenue_per_ASIC = block_reward / N  +  Z × proof_fee
 
 ### 6.3 Mixed Network Equilibrium
 
-When ZK-PoUW and Pure PoW miners coexist:
+When ZK-PoUW and Pure PoW miners coexist, let α = N\_z/N (fraction of ZK-PoUW miners). The hashrate ratio 1.9× = 95%/50% is the Poseidon2 die allocation ratio (Pure PoW devotes 95% of die to hashing vs ZK-PoUW's 50%).
 
 ```
-Pure PoW miner revenue:   1.9H / R_total × B
-ZK-PoUW miner revenue:    H / R_total × B  +  Z × F
+Total hashrate:  R = N·H·(1.9 - 0.9α)       // N_p×1.9H + N_z×H
+
+Pure PoW miner revenue:   1.9H / R × B       = 1.9B / (N(1.9 - 0.9α))
+ZK-PoUW miner revenue:      H / R × B + Z×F  =   B / (N(1.9 - 0.9α)) + Z×F
 ```
 
-ZK-PoUW is preferred when:
+ZK-PoUW is preferred when its total revenue exceeds Pure PoW's:
 
 ```
-Z × F  >  0.9 × H / R_total × B
-       =  0.9 × (per-miner mining reward)
+Z × F  >  (1.9 - 1) × B / (N(1.9 - 0.9α))
+       =  0.9 × (ZK-PoUW miner's mining revenue)
 ```
 
 As the network grows (N → ∞), per-miner mining reward → 0, while ZK fees remain constant. **Beyond a crossover network size N\*, ZK-PoUW always dominates.**
@@ -392,7 +394,9 @@ As the network grows (N → ∞), per-miner mining reward → 0, while ZK fees r
 N* = 0.9 B / ((1.9 - 0.9α) × Z × F)
 ```
 
-where α is the fraction of miners using ZK-PoUW.
+where α is the fraction of miners using ZK-PoUW. At α = 0 (all Pure PoW): N\* = 0.9B / (1.9·ZF) ≈ 0.47B/(ZF). At α = 1 (all ZK-PoUW): N\* = 0.9B / (1.0·ZF) = 0.9B/(ZF). The crossover point increases with ZK-PoUW adoption because difficulty adjusts to accommodate the mixed hashrate.
+
+**Power-basis refinement:** The 1.9× ratio is die-area-based. On a hashes-per-watt basis, Pure PoW achieves ~1.4–1.6× because NTT (25% die) and SRAM (20% die) contribute static leakage (~10–20% of their dynamic power) even when idle. This narrows the competitive gap and lowers N\* in practice.
 
 ### 6.4 Nash Equilibrium
 
@@ -449,6 +453,11 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 - Kaspa's modular architecture permits hash function upgrade via hard fork
 - No known viable attack exists against Poseidon2 with recommended parameters
 
+**Emergency response:** If a Poseidon2 weakness is discovered:
+- Immediate: Increase difficulty to offset any attack advantage
+- Short-term: Hard fork to fallback hash (e.g., Blake3-PoW) using the control logic already present in the ASIC's I/O path
+- Medium-term: Deploy replacement algebraic hash with ASIC firmware update (if the vulnerability is specific to Poseidon2 constants rather than the algebraic structure)
+
 **Assessment:** Accepted risk, shared with the broader Poseidon2 ecosystem. The benefit (mining ASIC = ZK prover) outweighs the concentration risk, particularly if Kaspa adopts Stwo as its ZK backend.
 
 ### 7.3 Non-Standard Width and Mode
@@ -461,10 +470,12 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 | 16 | Compression | Various Merkle trees | Analyzed (recommended by [3]) |
 | **24** | **Compression** | **This proposal** | **Width analyzed; compression mode needs review** |
 
+**Round number adequacy (preliminary):** The Poseidon2 paper [3] specifies minimum rounds as a function of width t and security level. For t ≤ 24 over a prime field with α = 5, the recommended minimum is R\_f = 8, R\_p ≥ ⌈log\_5(2 · security\_bits)⌉ + partial\_round\_margin. With R\_p = 14 (same as Stwo's width 16), the margin decreases as width grows because the algebraic degree per round increases more slowly relative to the state size. A dedicated analysis must confirm R\_p = 14 remains sufficient for width 24, or determine if R\_p should increase (e.g., to 16–18).
+
 **Required:** Commission dedicated security analysis for Poseidon2 with t = 24 over M31 in **compression function mode**, covering:
-- Algebraic attack resistance (Gröbner basis complexity bounds)
-- Differential and linear cryptanalysis
-- Round number adequacy (R\_f = 8, R\_p = 14) for width 24
+- Algebraic attack resistance (Gröbner basis complexity bounds for width 24)
+- Differential and linear cryptanalysis (larger state → more diffusion paths)
+- Round number adequacy (R\_f = 8, R\_p = 14) — verify sufficient margin for width 24
 - MDS matrix security properties for the 24×24 case
 - Compression function mode security (all state elements visible, no hidden capacity)
 - Independence of dual PoW tickets (S[8..15] and S[16..23] from same permutation)
@@ -472,6 +483,14 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 ### 7.4 PoW Hash Distribution
 
 Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The two PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict pow₂ from pow₁ without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 14 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
+
+**Dual-ticket mining advantage:** With two independent 248-bit tickets per permutation, the probability of finding at least one valid PoW per permutation is:
+
+```
+P(valid) = 1 - (1 - T/2^248)² ≈ 2T/2^248    for small T/2^248
+```
+
+This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area, after accounting for the larger width-24 core). Importantly, a miner cannot selectively publish one ticket while withholding the other — both tickets are deterministic outputs of the same permutation and can be independently verified by any node. This prevents ticket-grinding attacks where a miner might discard unfavorable tickets.
 
 ### 7.5 Quantum Resistance
 
@@ -543,7 +562,7 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 ## 9. Open Questions
 
-1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are still placeholders. Final production constants may affect security margins.
+1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are explicit placeholders — both `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` are uniformly set to `1234` with a TODO comment (`// TODO(shahars): Use poseidon's real constants.`). Final production constants are required before security analysis can be completed. The architectural parameters (width, round counts) are stable, but the concrete permutation is not yet defined for production use.
 
 2. **Width 24 compression function security analysis.** Width 24 Poseidon2 has been analyzed in sponge mode, but compression function mode (all 24 elements visible) over M31 requires dedicated review. This analysis is a prerequisite for deployment, covering algebraic attacks, round number adequacy, and the dual-ticket independence property.
 
@@ -557,7 +576,11 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 7. **Compression function security.** This proposal uses Poseidon2 in compression function mode (all 24 state elements visible), unlike Stwo's standard sponge mode (8 capacity elements hidden). While compression mode is recommended by the Poseidon2 paper [3] and widely used for Merkle trees, the specific configuration (width 24 over M31, no capacity, dual PoW tickets) requires dedicated security analysis.
 
-8. **Stwo verifier compatibility.** Standard Stwo verifiers using width-16 sponge cannot directly verify commitments produced by the width-24 compression function. A modified Stwo configuration or adapter layer is required for ZK-PoUW integration.
+8. **Stwo verifier compatibility.** Standard Stwo verifiers using width-16 sponge cannot directly verify commitments produced by the width-24 compression function. Three integration approaches exist:
+   - **(a) Modified Stwo configuration:** Fork Stwo to support width-24 compression natively. Lowest runtime overhead but requires maintaining a parallel Stwo branch.
+   - **(b) Adapter layer:** The ZK-PoUW ASIC produces width-24 Merkle trees internally, but a thin software layer re-hashes the Merkle commitments into width-16 sponge format before passing to the standard Stwo verifier. This doubles the Merkle hashing cost at the proof submission boundary but preserves full Stwo compatibility.
+   - **(c) Dual-mode prover:** The ASIC runs width-24 for PoW Merkle hashing but switches to width-16 sponge for STARK Merkle commitments that will be verified externally. This cleanly separates PoW and STARK hash domains but loses the dual-ticket benefit during STARK phases.
+   Each approach trades off compatibility, performance, and maintenance burden. The choice depends on Stwo's upstream willingness to accept width-24 as a configuration option.
 
 9. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
 
