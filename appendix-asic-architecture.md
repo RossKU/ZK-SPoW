@@ -322,6 +322,6 @@ Poseidon2 has ~16× lower PoW hashrate per die than kHeavyHash. **This is absorb
 | Poseidon2 width (extended) | 13 (rate 9, cap 4) | 28 (rate 20, cap 8) |
 | Hash output | 4 × 64 = 256 bits | 8 × 31 = 248 bits |
 | Cores per die (30M gates) | ~23 | ~29 |
-| STARK ecosystem | Plonky2/Plonky3 | **Stwo (Kaspa's choice)** |
+| STARK ecosystem | Plonky2/Plonky3 | **Stwo (potential Kaspa choice)** |
 
-**M31 is the only viable choice** given Kaspa's adoption of Stwo. The smaller multiplier (1/3.5 area) enables higher core density and hashrate per die, while matching Stwo's field arithmetic exactly.
+**M31 is the natural choice** if Kaspa adopts Stwo. The smaller multiplier (1/3.5 area) enables higher core density and hashrate per die, while matching Stwo's field arithmetic exactly.

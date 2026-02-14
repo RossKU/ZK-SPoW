@@ -32,9 +32,9 @@ The key insight: ZK proof computation *is* work. When an ASIC runs the Stwo prov
 
 ### 2.3 Stwo and Poseidon2
 
-Kaspa has adopted StarkWare's **Stwo** [4] as the STARK backend for verifiable programs (vProgs). Stwo operates over the Mersenne field M31 and uses **Poseidon2** [3] as its internal hash function for Merkle tree commitments and Fiat-Shamir challenges.
+Kaspa is evaluating StarkWare's **Stwo** [4] as a potential STARK backend for verifiable programs (vProgs). Stwo operates over the Mersenne field M31 and uses **Poseidon2** [3] as its internal hash function for Merkle tree commitments and Fiat-Shamir challenges.
 
-This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — is *identical* to what is needed for STARK proof generation. Mining hardware becomes ZK proving hardware at zero additional cost.
+This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — is *identical* to what is needed for STARK proof generation. Mining hardware becomes ZK proving hardware, with the only additional cost being a Poseidon2 MDS width extension (+7% die area, see §4.2).
 
 ---
 
@@ -304,12 +304,12 @@ Four designs compared under identical die area and power budget:
 
 | Design | Die allocation | Hashrate | ZK Throughput | U | Can mine? |
 |--------|---------------|----------|--------------|---|-----------|
-| Pure PoW | 95% Poseidon2, 5% control | 1.9 H | 0 | 0% | Yes |
+| Pure PoW | 95% Poseidon2, 5% control | ~1.9 H (die area) | 0 | 0% | Yes |
 | Pure Stwo | 20% Poseidon2, 40% NTT, 35% SRAM | 0 | Z\_max | 100% | No |
 | **ZK-PoUW** | **50% Poseidon2, 25% NTT, 20% SRAM** | **H** | **Z** | **100%** | **Yes** |
 | ZK-PoUW+HBM | 50% Poseidon2, 25% NTT, 20% HBM I/F | H | Z\_hbm | 100% | Yes |
 
-Pure PoW achieves 1.9× hashrate by filling NTT and SRAM area with additional Poseidon2 cores but produces no ZK proofs (U = 0%). Pure Stwo achieves U = 100% but cannot mine — it cannot independently sustain the network and has no block reward income. Only ZK-PoUW achieves both U = 100% and mining capability.
+Pure PoW achieves ~1.9× hashrate (die-area basis) by filling NTT and SRAM area with additional Poseidon2 cores but produces no ZK proofs (U = 0%). However, in Pure PoW mode NTT and SRAM are idle (static leakage only, no dynamic power), so the power-efficiency gap is smaller than the die-area ratio — estimated ~1.4–1.6× on a hashes-per-watt basis. Pure Stwo achieves U = 100% but cannot mine — it cannot independently sustain the network and has no block reward income. Only ZK-PoUW achieves both U = 100% and mining capability.
 
 ### 6.2 Post-Difficulty-Adjustment Revenue
 
@@ -381,7 +381,7 @@ Revenue/ASIC
     └────────────────────────→ Network size N
 ```
 
-ZK-PoUW provides a **revenue floor** from ZK fees. Pure PoW miners face revenue declining monotonically with network growth, with no alternative income source.
+ZK-PoUW may provide a **revenue floor** from ZK fees, contingent on sufficient ZK proof demand. Pure PoW miners see block rewards decline with network growth, transitioning to transaction fees as the primary income source.
 
 ---
 
@@ -407,7 +407,7 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 - Kaspa's modular architecture permits hash function upgrade via hard fork
 - No known viable attack exists against Poseidon2 with recommended parameters
 
-**Assessment:** Accepted risk, shared with the broader Poseidon2 ecosystem. The benefit (mining ASIC = ZK prover) outweighs the concentration risk for a system already committed to Stwo.
+**Assessment:** Accepted risk, shared with the broader Poseidon2 ecosystem. The benefit (mining ASIC = ZK prover) outweighs the concentration risk, particularly if Kaspa adopts Stwo as its ZK backend.
 
 ### 7.3 Non-Standard Width
 
@@ -434,8 +434,8 @@ The pow\_hash = S[8..15] consists of rate elements (not capacity). Revealing rat
 Poseidon2's security against quantum adversaries:
 - Grover's algorithm halves the effective hash bits: 248/2 = 124-bit quantum security
 - Comparable to SHA-256 under quantum attack (256/2 = 128 bits)
-- kHeavyHash (Blake3 based) has similar quantum resistance profile
-- No regression from the transition
+- kHeavyHash: 256/2 = 128-bit quantum security
+- **4-bit regression** from the transition (124 vs 128 quantum bits)
 
 ---
 
@@ -467,7 +467,7 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 | STARK proof in block? | **No** (Option C) | Eliminates +3–5 MB/s bandwidth at 100 BPS |
 | Hash function | **Poseidon2** | Stwo compatibility |
 | Field | **M31** | Stwo standard (smallest multiplier, highest core density) |
-| PoW hash size | **248 bits** (8 M31 elements) | ≈ 256-bit, matches kHeavyHash/Bitcoin class |
+| PoW hash size | **248 bits** (8 M31 elements) | Close to 256-bit kHeavyHash/Bitcoin class (8-bit reduction) |
 | Header hash elements | **4** (124 bits) | Birthday bound 2^62 (secure) |
 | STARK enforcement | **None** | Market-driven ZK adoption; avoids bandwidth penalty |
 | Nonce structure | **(v₁, v₂)** each 8 elements | 64 bytes, maps to Merkle child pair in STARK mode |
@@ -512,14 +512,14 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 ## 10. References
 
-[1] Ball, M., Rosen, A., Sabin, M., & Vasudevan, P. N. (2021). "Proofs of Useful Work." *IACR Cryptology ePrint Archive*, 2017/203.
+[1] Ball, M., Rosen, A., Sabin, M., & Vasudevan, P. N. (2017). "Proofs of Useful Work." *IACR Cryptology ePrint Archive*, 2017/203. https://eprint.iacr.org/2017/203
 
-[2] Grassi, L., Khovratovich, D., Rechberger, C., Roy, A., & Schofnegger, M. (2021). "Poseidon: A New Hash Function for Zero-Knowledge Proof Systems." *USENIX Security Symposium*.
+[2] Grassi, L., Khovratovich, D., Rechberger, C., Roy, A., & Schofnegger, M. (2021). "Poseidon: A New Hash Function for Zero-Knowledge Proof Systems." *USENIX Security Symposium*. https://eprint.iacr.org/2019/458
 
-[3] Grassi, L., Khovratovich, D., & Schofnegger, M. (2023). "Poseidon2: A Faster Version of the Poseidon Hash Function." *IACR Cryptology ePrint Archive*, 2023/323.
+[3] Grassi, L., Khovratovich, D., & Schofnegger, M. (2023). "Poseidon2: A Faster Version of the Poseidon Hash Function." *IACR Cryptology ePrint Archive*, 2023/323. https://eprint.iacr.org/2023/323
 
 [4] StarkWare. "Stwo: A STARK Prover." https://github.com/starkware-libs/stwo
 
-[5] Sompolinsky, Y., & Zohar, A. "DAGKNIGHT: A Parameterless Generalization of Nakamoto Consensus."
+[5] Sompolinsky, Y., & Sutton, M. (2022). "The DAG KNIGHT Protocol: A Parameterless Generalization of Nakamoto Consensus." *IACR Cryptology ePrint Archive*, 2022/1494. https://eprint.iacr.org/2022/1494
 
 [6] Kaspa. "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa
