@@ -1,6 +1,6 @@
 # Appendix A: ASIC Architecture Details
 
-**Companion to: ZK-PoUW Yellow Paper v0.1**
+**Companion to: ZK-PoUW v0.1**
 
 ---
 
@@ -251,11 +251,11 @@ PoW allocation:    remaining ≈ 89.6%
 |--------|-------|------|
 | Hardware STARK fraction (f) | ~10% | SRAM-bandwidth limited |
 | Hardware PoW fraction | ~90% | Fills idle Poseidon2 cycles |
-| U (usefulness) | **100%** | f is a throughput metric, not waste |
+| U (usefulness) | **100%** | ZK proof computation = useful work (see §2.2 of main document) |
 | STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
 | PoW hashrate | ~20G hashes/sec | Same as Pure PoW mode |
 
-**f is not waste.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). Both produce value. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
+**f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U = 100% because the ASIC is executing ZK proof computation — useful work by definition. The PoW fill cycles provide additional network security as a costless byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization. Higher SRAM bandwidth increases ZK proof *economic throughput* (more proofs/sec) but does not change U.
 
 ### A.5.4 Increasing STARK Throughput
 
@@ -266,7 +266,7 @@ PoW allocation:    remaining ≈ 89.6%
 | HBM3 8 GB | 1.2 TB/s | ~63% | ~1,560 |
 | HBM3E 16 GB | 2.4 TB/s | ~94% | ~3,120 |
 
-With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve both STARK and PoW simultaneously — approaching strict Ball et al. PoUW.
+With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof *economic throughput* but does not change U (which is already 100% when Stwo is active) nor does it satisfy Ball et al.'s strict PoUW definition (which requires protocol-level verification of usefulness — absent under Option C).
 
 ---
 

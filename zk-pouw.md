@@ -24,11 +24,11 @@ Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where 
 2. The verifier can confirm the usefulness
 3. The useful output is bound to the PoW evidence
 
-We adopt a broader **practical definition**:
+We adopt a **practical definition**:
 
-> **Definition (Usefulness).** U = 100% when every unit of energy expended by mining hardware produces either useful computation (ZK proofs) or network security (PoW), with zero waste.
+> **Definition (Usefulness).** U = 100% iff the mining hardware is executing ZK proof computation. ZK proof generation constitutes useful work — the economic output (verifiable proofs) has independent value regardless of whether a PoW solution is found during the computation. PoW nonce grinding without concurrent ZK computation provides network security but does not constitute useful work (U = 0%).
 
-Under this definition, an ASIC that continuously generates ZK proofs while simultaneously mining achieves U = 100%, because both outputs — economic (ZK proofs) and security (PoW) — are valuable. No energy is wasted.
+The key insight: ZK proof computation *is* work. When an ASIC runs the Stwo prover, every cycle of operation produces economically valuable ZK proofs. PoW tickets emerge as a costless byproduct of the same Poseidon2 hashes. If a PoW solution is found mid-proof, the block is submitted, but U does not decrease — the ASIC was performing useful work throughout. When no ZK demand exists, the ASIC reverts to pure PoW (U = 0%), identical to any conventional miner.
 
 ### 2.3 Stwo and Poseidon2
 
@@ -228,10 +228,10 @@ if pow_ticket < target → BLOCK FOUND
 ```
 
 Every Poseidon2 invocation in the STARK computation simultaneously:
-- **(a)** Advances the ZK proof (economic value)
-- **(b)** Produces a PoW ticket (network security)
+- **(a)** Advances the ZK proof (economic value — useful work)
+- **(b)** Produces a PoW ticket (network security — costless byproduct)
 
-**U = 100%.** No computation cycle is wasted.
+**U = 100%.** The ASIC is performing ZK proof computation — useful work by definition. PoW tickets are a costless byproduct of the same Poseidon2 hashes. Even if a PoW solution is found mid-proof, U remains 100%: the ASIC was doing useful work (ZK) throughout.
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -247,6 +247,8 @@ loop:
 
 Identical Poseidon2 pipeline, identical throughput. The only difference is the input source: random/sequential nonces instead of STARK Merkle children.
 
+**U = 0%.** No ZK proof is being computed. The ASIC provides network security only, equivalent to any conventional PoW miner. This is not waste — security has value — but it is not useful work in the PoUW sense.
+
 ### 5.3 Linear Mode Transition
 
 ```
@@ -261,13 +263,36 @@ Identical Poseidon2 pipeline, identical throughput. The only difference is the i
 └────────────────────────────────────────────────────────────┘
 ```
 
-The transition between PoUW and Pure PoW is **per-cycle and linear**, not a discrete mode switch. When ZK demand is high, more cycles serve STARK; when low, more cycles serve PoW. The pipeline is always full.
+The transition between PoUW and Pure PoW is **per-cycle and linear**, not a discrete mode switch. When the Poseidon2 MDS is executing STARK computation, that cycle is PoUW. When SRAM data is not ready, a random nonce hash is substituted and that cycle is PoW. The pipeline is always full — the ratio of PoUW to PoW cycles is determined by SRAM bandwidth, not by difficulty or protocol parameters.
 
 ### 5.4 Hashrate Invariance
 
 > **Proposition.** Total PoW hashrate H is independent of the operating mode.
 >
 > *Argument.* H = N\_cores × throughput\_per\_core. Each core's throughput is 1 hash per pipeline\_depth cycles (fully pipelined), regardless of whether the input is a STARK Merkle pair or a random nonce. Input MUX adds zero latency (combinational logic). Therefore H is constant across PoUW, Pure PoW, and any mixed state.
+
+### 5.5 Difficulty Independence
+
+U is determined by ZK demand, not by PoW difficulty.
+
+| Condition | U | Rationale |
+|-----------|---|-----------|
+| Stwo Prover active, any difficulty | 100% | ZK proof computation = useful work |
+| No ZK demand, any difficulty | 0% | Pure PoW = security only |
+
+Difficulty affects how many hashes are needed to find a block, but does not change what the ASIC is *doing*. Whether difficulty is 8M or 188G, the ASIC either computes ZK proofs (U = 100%) or grinds nonces (U = 0%). The ratio of STARK-to-PoW cycles within the pipeline is determined by SRAM bandwidth (a hardware constant), not by the network's difficulty target.
+
+### 5.6 Complementary Bottleneck Structure
+
+The simultaneous execution of PoW and STARK is possible because they bottleneck on different resources:
+
+| Resource | PoW | STARK | Combined |
+|----------|-----|-------|----------|
+| Poseidon2 cores | **100%** (compute-bound) | ~10% (data-starved) | **~100%** |
+| NTT unit | 0% (unused) | **100%** | **100%** |
+| SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
+
+PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. This complementary structure is the foundation of the Pareto optimality claim in §6.
 
 ---
 
@@ -284,7 +309,7 @@ Four designs compared under identical die area and power budget:
 | **ZK-PoUW** | **50% Poseidon2, 25% NTT, 20% SRAM** | **H** | **Z** | **100%** | **Yes** |
 | ZK-PoUW+HBM | 50% Poseidon2, 25% NTT, 20% HBM I/F | H | Z\_hbm | 100% | Yes |
 
-Pure PoW achieves 1.9× hashrate by filling NTT and SRAM area with additional Poseidon2 cores. Pure Stwo cannot mine (no PoW capability) and cannot independently sustain the network.
+Pure PoW achieves 1.9× hashrate by filling NTT and SRAM area with additional Poseidon2 cores but produces no ZK proofs (U = 0%). Pure Stwo achieves U = 100% but cannot mine — it cannot independently sustain the network and has no block reward income. Only ZK-PoUW achieves both U = 100% and mining capability.
 
 ### 6.2 Post-Difficulty-Adjustment Revenue
 
@@ -453,19 +478,19 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 |--------|------------------|-----------------|-------------------|
 | A | Every block | +3–5 MB/s | Yes (strict) |
 | B | Every N blocks | +50 KB/s (N=100) | Partial |
-| **C** | **None** | **None** | **Practical (U=100%)** |
+| **C** | **None** | **None** | **Practical (U=100% when ZK active)** |
 
-Option C was selected because it preserves Kaspa's existing bandwidth profile while achieving PoUW goals through economic incentives rather than protocol enforcement.
+Option C was selected because it preserves Kaspa's existing bandwidth profile while enabling PoUW through economic incentives rather than protocol enforcement. U = 100% when ZK demand exists (miners voluntarily run Stwo); U = 0% when no ZK demand (pure PoW fallback).
 
 ### 8.3 Relationship to Ball et al.
 
 | Ball et al. requirement | Status |
 |------------------------|--------|
-| PoW computation produces useful output | Partial: STARK hashes are useful; PoW fill hashes are not |
+| PoW computation produces useful output | Partial: STARK hashes produce useful output; PoW fill hashes provide security only (not "useful" per Ball et al.) |
 | Verifier confirms usefulness | Not enforced (Option C) |
 | Useful output bound to PoW evidence | Not enforced (STARK proof not in block) |
 
-ZK-PoUW does not satisfy Ball et al.'s strict definition. It satisfies the **practical PoUW definition**: when ZK demand exists, all ASIC energy produces valuable output (ZK proofs + PoW security), with zero waste. The protocol enables PoUW without mandating it.
+ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It satisfies the **practical PoUW definition** (§2.2): when ZK demand exists, the ASIC performs ZK proof computation (U = 100%) and PoW tickets emerge as byproducts. When no ZK demand exists, U = 0% — the ASIC is a conventional miner. The protocol *enables* PoUW without *mandating* it, making the transition market-driven rather than protocol-enforced.
 
 ---
 
