@@ -14,7 +14,7 @@ We propose replacing Kaspa's kHeavyHash proof-of-work function with Poseidon2 ov
 
 ### 2.1 The PoW Energy Problem
 
-Kaspa uses kHeavyHash — Blake3 composed with a 256×256 binary matrix multiplication — for proof of work. Like all traditional PoW schemes, the computational work produces no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
+Kaspa uses kHeavyHash — cSHAKE256 (Keccak/SHA-3 family) composed with a 64×64 matrix multiplication over 4-bit nibbles — for proof of work. Like all traditional PoW schemes, the computational work produces no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
 
 ### 2.2 Proof of Useful Work
 
@@ -75,11 +75,11 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 **Current (kHeavyHash):**
 
 ```
-pow_hash = Blake3(M · Blake3(H || nonce))
+pow_hash = cSHAKE256(M · cSHAKE256(H || nonce) ⊕ cSHAKE256(H || nonce))
 valid iff pow_hash < target
 ```
 
-where M is a fixed 256×256 binary matrix, nonce is 8 bytes.
+where M is a 64×64 matrix (generated from header, full-rank over nibbles), nonce is 8 bytes.
 
 **Proposed (Poseidon2-PoW):**
 

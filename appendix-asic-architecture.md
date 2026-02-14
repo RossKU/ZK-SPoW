@@ -275,8 +275,8 @@ With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles se
 ### A.6.1 kHeavyHash Core
 
 ```
-Blake3 hash (×2):           ~50K gates
-256×256 binary matrix mul:  ~65K gates (fixed matrix, XOR array)
+cSHAKE256 hash (×2):        ~50K gates (Keccak-f[1600] based)
+64×64 nibble matrix mul:    ~65K gates (integer matmul + XOR)
 Control:                     ~5K gates
 ─────────────────────────────────────
 Total:                      ~120K gates per core
