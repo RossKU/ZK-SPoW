@@ -351,83 +351,17 @@ Four designs compared under identical die area and power budget:
 | **ZK-PoUW** | **50% Poseidon2, 25% NTT, 20% SRAM** | **H** | **Z** | **100%** | **Yes** |
 | ZK-PoUW+HBM | 50% Poseidon2, 25% NTT, 20% HBM I/F | H | Z\_hbm | 100% | Yes |
 
-Pure PoW achieves ~1.9× hashrate (die-area basis) by filling NTT and SRAM area with additional Poseidon2 cores but produces no ZK proofs (U = 0%). However, in Pure PoW mode NTT and SRAM are idle (static leakage only, no dynamic power), so the power-efficiency gap is smaller than the die-area ratio — estimated ~1.4–1.6× on a hashes-per-watt basis. Pure Stwo achieves U = 100% but cannot mine — it cannot independently sustain the network and has no block reward income. Only ZK-PoUW achieves both U = 100% and mining capability.
+Pure PoW achieves ~1.9× hashrate on a die-area basis (95%/50% Poseidon2 allocation) but produces no ZK proofs (U = 0%). On a hashes-per-watt basis, the gap narrows to ~1.1–1.2× because idle NTT and SRAM contribute static leakage (~10–20% of dynamic power). Pure Stwo achieves U = 100% but cannot mine. Only ZK-PoUW achieves both U = 100% and mining capability.
 
-### 6.2 Post-Difficulty-Adjustment Revenue
+### 6.2 Economic Dominance
 
-Difficulty adjusts to total network hashrate. When all N miners use the same design, per-ASIC mining revenue is identical regardless of design. The differentiator is ZK revenue.
-
-```
-Revenue_per_ASIC = block_reward / N  +  Z × proof_fee
-                   ─────────────────     ──────────────
-                   mining (same for all)  ZK (design-dependent)
-```
-
-| Design | Mining revenue | ZK revenue | Total |
-|--------|---------------|------------|-------|
-| Pure PoW (all N) | B/N | 0 | B/N |
-| ZK-PoUW (all N) | B/N | Z × F | **B/N + ZF** |
-
-**ZK-PoUW strictly dominates Pure PoW: B/N + ZF > B/N for any ZF > 0.**
-
-### 6.3 Mixed Network Equilibrium
-
-When ZK-PoUW and Pure PoW miners coexist, let α = N\_z/N (fraction of ZK-PoUW miners). The hashrate ratio 1.9× = 95%/50% is the Poseidon2 die allocation ratio (Pure PoW devotes 95% of die to hashing vs ZK-PoUW's 50%).
+Difficulty adjusts to total network hashrate. When all N miners use the same design, per-ASIC mining revenue is B/N regardless of absolute hashrate. The differentiator is ZK revenue:
 
 ```
-Total hashrate:  R = N·H·(1.9 - 0.9α)       // N_p×1.9H + N_z×H
-
-Pure PoW miner revenue:   1.9H / R × B       = 1.9B / (N(1.9 - 0.9α))
-ZK-PoUW miner revenue:      H / R × B + Z×F  =   B / (N(1.9 - 0.9α)) + Z×F
+ZK-PoUW revenue = B/N + Z×F   >   B/N = Pure PoW revenue    (for any ZF > 0)
 ```
 
-ZK-PoUW is preferred when its total revenue exceeds Pure PoW's:
-
-```
-Z × F  >  (1.9 - 1) × B / (N(1.9 - 0.9α))
-       =  0.9 × (ZK-PoUW miner's mining revenue)
-```
-
-As the network grows (N → ∞), per-miner mining reward → 0, while ZK fees remain constant. **Beyond a crossover network size N\*, ZK-PoUW always dominates.**
-
-```
-N* = 0.9 B / ((1.9 - 0.9α) × Z × F)
-```
-
-where α is the fraction of miners using ZK-PoUW. At α = 0 (all Pure PoW): N\* = 0.9B / (1.9·ZF) ≈ 0.47B/(ZF). At α = 1 (all ZK-PoUW): N\* = 0.9B / (1.0·ZF) = 0.9B/(ZF). The crossover point increases with ZK-PoUW adoption because difficulty adjusts to accommodate the mixed hashrate.
-
-**Power-basis refinement:** The 1.9× ratio is die-area-based. On a hashes-per-watt basis, Pure PoW achieves ~1.4–1.6× because NTT (25% die) and SRAM (20% die) contribute static leakage (~10–20% of their dynamic power) even when idle. This narrows the competitive gap and lowers N\* in practice.
-
-### 6.4 Nash Equilibrium
-
-> **Theorem (informal).** In a mature ZK market where Z × F exceeds the hashrate differential value, the unique Nash equilibrium is all miners choosing ZK-PoUW.
->
-> *Argument.*
-> 1. Given all others choose ZK-PoUW, switching to Pure PoW gains ~0.9× hashrate advantage but loses Z × F in ZK fees.
-> 2. For Z × F > 0.9 × (per-miner mining reward), deviating to Pure PoW is unprofitable.
-> 3. No miner can profitably switch to Pure Stwo (cannot mine, loses block reward share).
-> 4. No miner has incentive to deviate → Nash equilibrium.
-
-In the early network phase (Z × F ≈ 0), Pure PoW is the equilibrium. As the ZK market matures, the equilibrium shifts to ZK-PoUW. This transition is gradual — the ZK-PoUW ASIC functions as a Pure PoW miner until ZK demand appears.
-
-### 6.5 Revenue Resilience
-
-```
-Revenue/ASIC
-    ↑
-    │╲
-    │  ╲  Mining reward B/N (declining with network growth)
-    │    ╲
-    │─────╲─────────────────── ZK-PoUW total revenue
-    │       ╲
-    │        ╲━━━━━━━━━━━━━━━ ZK fee floor (constant)
-    │
-    │── ── ── ── ── ── ── ── ── Pure PoW (mining only, no floor)
-    │
-    └────────────────────────→ Network size N
-```
-
-ZK-PoUW may provide a **revenue floor** from ZK fees, contingent on sufficient ZK proof demand. Pure PoW miners see block rewards decline with network growth, transitioning to transaction fees as the primary income source.
+Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more mining revenue per watt in a mixed network. Once ZK fee income Z×F exceeds this margin, ZK-PoUW strictly dominates. As the network grows (N → ∞), per-miner mining reward → 0 while ZK fees remain constant, making ZK-PoUW the eventual equilibrium. In the interim (ZF ≈ 0), ZK-PoUW ASICs function as standard PoW miners with no penalty.
 
 ---
 
