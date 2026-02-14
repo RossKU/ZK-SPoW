@@ -6,7 +6,7 @@
 
 ## 1. Abstract
 
-We propose replacing Kaspa's kHeavyHash proof-of-work function with Poseidon2 over the Mersenne field M31, the same algebraic hash function used internally by the Stwo STARK prover. By extending the Poseidon2 permutation width from 16 to 24 elements and operating in compression function mode, every Poseidon2 invocation accepts a Merkle child pair plus block\_header as input and simultaneously produces two independent PoW tickets. This unification means that a mining ASIC and a ZK prover share identical Poseidon2 cores — a property we call **ZK-Symbiotic Proof of Work**. The same hardware performs both network security (PoW) and useful computation (ZK proofs) with zero-overhead switching and no hashrate degradation in either mode. We show this design is Pareto-optimal and constitutes a Nash equilibrium among rational miners in a mature ZK fee market.
+We propose replacing Kaspa's kHeavyHash proof-of-work function with Poseidon2 over the Mersenne field M31, the same algebraic hash function used internally by the Stwo STARK prover. By extending the Poseidon2 permutation width from 16 to 24 elements and operating in compression function mode, every Poseidon2 invocation accepts a Merkle child pair plus block\_header as input and simultaneously produces two independent PoW tickets. This unification means that a mining ASIC and a ZK prover share the same Poseidon2 core design — a property we call **ZK-Symbiotic Proof of Work**. The width extension adds ~+22% die area overhead, but in return the same hardware can perform both network security (PoW) and useful computation (ZK proofs) with cycle-level switching and no hashrate degradation.
 
 ---
 
@@ -28,7 +28,7 @@ We adopt a **practical definition**:
 
 > **Definition (Usefulness).** U = 100% iff the mining hardware is executing ZK proof computation. ZK proof generation constitutes useful work — the economic output (verifiable proofs) has independent value regardless of whether a PoW solution is found during the computation. PoW nonce grinding without concurrent ZK computation provides network security but does not constitute useful work (U = 0%).
 
-The key insight: ZK proof computation *is* work. When an ASIC runs the Stwo prover, every cycle of operation produces economically valuable ZK proofs. PoW tickets emerge as a costless byproduct of the same Poseidon2 hashes. If a PoW solution is found mid-proof, the block is submitted, but U does not decrease — the ASIC was performing useful work throughout. When no ZK demand exists, the ASIC reverts to pure PoW (U = 0%), identical to any conventional miner.
+The key insight: ZK proof computation *is* work. When an ASIC runs the Stwo prover, every cycle of operation produces economically valuable ZK proofs. PoW tickets emerge as a low-marginal-cost byproduct of the same Poseidon2 hashes — the per-permutation cost is zero, though the width extension from 16 to 24 adds ~+22% die area as a fixed overhead (see §4.2). If a PoW solution is found mid-proof, the block is submitted, but U does not decrease — the ASIC was performing useful work throughout. When no ZK demand exists, the ASIC reverts to pure PoW (U = 0%), identical to any conventional miner.
 
 ### 2.3 Stwo and Poseidon2
 
@@ -271,9 +271,9 @@ if pow_ticket₁ < target OR pow_ticket₂ < target → BLOCK FOUND
 
 Every Poseidon2 invocation in the STARK computation simultaneously:
 - **(a)** Advances the ZK proof (economic value — useful work)
-- **(b)** Produces a PoW ticket (network security — costless byproduct)
+- **(b)** Produces a PoW ticket (network security — low-marginal-cost byproduct)
 
-**U = 100%.** The ASIC is performing ZK proof computation — useful work by definition. PoW tickets are a costless byproduct of the same Poseidon2 hashes. Even if a PoW solution is found mid-proof, U remains 100%: the ASIC was doing useful work (ZK) throughout.
+**U = 100%.** The ASIC is performing ZK proof computation — useful work by definition. PoW tickets are a low-marginal-cost byproduct of the same Poseidon2 hashes. Even if a PoW solution is found mid-proof, U remains 100%: the ASIC was doing useful work (ZK) throughout.
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -334,7 +334,7 @@ The simultaneous execution of PoW and STARK is possible because they bottleneck 
 | NTT unit | 0% (unused) | **100%** | **100%** |
 | SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
 
-PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. This complementary structure is the foundation of the Pareto optimality claim in §6.
+PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. This complementary structure is the foundation of the economic analysis in §6.
 
 ---
 
@@ -450,7 +450,7 @@ Five architectures were explored over multiple sessions before converging on ZK-
 | 4 | MatMul PoUW (Komargodski) | Domain-specific | O(n³) verification incompatible with 100 BPS |
 | 5 | Direction C (Pure ZK PoUW) | Unsolved | Fiat-Shamir cascade barrier (open problem) |
 
-The final design synthesizes insights from Architecture #2 (dual-use Poseidon outputs) and Architecture #3 (hardware multithreading with zero-cost context switch), while avoiding their individual weaknesses:
+The final design synthesizes insights from Architecture #2 (dual-use Poseidon outputs) and Architecture #3 (hardware multithreading with low-cost context switch), while avoiding their individual weaknesses:
 
 - From #2: The idea that STARK intermediate hashes can serve as PoW tickets
 - From #3: The MUX-based switching between STARK and PoW input sources
