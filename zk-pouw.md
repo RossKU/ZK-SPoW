@@ -173,7 +173,7 @@ Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal us
 | Width | 16 | 24 |
 | PoW tickets per hash | 0 | **2** |
 
-Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode **in compute-bound settings**. On the ZK-PoUW ASIC, STARK Merkle throughput is SRAM-bandwidth-bound (~2.08G hash/sec; see §A.5), so this per-permutation efficiency gain does not increase ZK proof rate — it instead frees Poseidon2 cycles for PoW fill. Width 24 is within the paper's analyzed parameter range, though compression function mode over M31 requires dedicated security review (see §7.3, §9).
+Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode **in compute-bound settings**. On the ZK-PoUW ASIC, STARK Merkle throughput is SRAM-bandwidth-bound (~2.08G hash/sec; see §A.5), so this per-permutation efficiency gain does not increase ZK proof rate — it instead frees Poseidon2 cycles for PoW fill. Width 24 is within the paper's analyzed parameter range; ZK security relies on Width-16 sponge (Mode B) which is well-analyzed (see §7.3).
 
 ### 4.3 I/O Mapping
 
@@ -396,25 +396,11 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 
 **Risk:** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously. This concentration risk is shared with the broader Poseidon2 ecosystem (notably Starknet).
 
-### 7.3 Non-Standard Width and Mode
+### 7.3 Width Extension and Security
 
-| Width | Mode | Deployment | Security analysis |
-|-------|------|-----------|------------------|
-| 8 | Sponge | Filecoin, Mina | Extensively analyzed |
-| 12 | Sponge | Plonky2 | Well analyzed |
-| 16 | Sponge | **Stwo (standard)** | Analyzed by StarkWare |
-| 16 | Compression | Various Merkle trees | Analyzed (recommended by [3]) |
-| **24** | **Compression** | **This proposal** | **Width analyzed; compression mode needs review** |
+ZK (STARK) security depends on Width-16 sponge mode (Mode B, §5.1), which is well-analyzed by StarkWare for Stwo deployment. The Width-24 extension does not affect ZK security — it is used only for PoW, which requires only preimage resistance (248-bit Poseidon2 output, trivially sufficient). Width 24 is within the Poseidon2 paper's analyzed parameter range [3], and compression function mode is explicitly recommended for Merkle trees.
 
-**Round number adequacy (preliminary):** The Poseidon2 paper [3] specifies minimum rounds as a function of width t and security level. For t ≤ 24 over a prime field with α = 5, the recommended minimum is R\_f = 8, R\_p ≥ ⌈log\_5(2 · security\_bits)⌉ + partial\_round\_margin. With R\_p = 14 (same as Stwo's width 16), the margin decreases as width grows because the algebraic degree per round increases more slowly relative to the state size. A dedicated analysis must confirm R\_p = 14 remains sufficient for width 24, or determine if R\_p should increase (e.g., to 16–18).
-
-**Required:** Commission dedicated security analysis for Poseidon2 with t = 24 over M31 in **compression function mode**, covering:
-- Algebraic attack resistance (Gröbner basis complexity bounds for width 24)
-- Differential and linear cryptanalysis (larger state → more diffusion paths)
-- Round number adequacy (R\_f = 8, R\_p = 14) — verify sufficient margin for width 24
-- MDS matrix security properties for the 24×24 case
-- Compression function mode security (all state elements visible, no hidden capacity)
-- Independence of dual PoW tickets (S[8..15] and S[16..23] from same permutation)
+If Mode A is adopted (Width-24 compression for STARK Merkle trees), collision resistance of the Width-24 compression function becomes relevant for ZK binding. This is a standard requirement within [3]'s analysis framework and does not introduce novel cryptographic concerns.
 
 ### 7.4 PoW Hash Distribution
 
@@ -500,7 +486,7 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are explicit placeholders — both `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` are uniformly set to `1234` with a TODO comment (`// TODO(shahars): Use poseidon's real constants.`). Final production constants are required before security analysis can be completed. The architectural parameters (width, round counts) are stable, but the concrete permutation is not yet defined for production use.
 
-2. **Width 24 compression function security analysis.** Width 24 Poseidon2 has been analyzed in sponge mode, but compression function mode (all 24 elements visible) over M31 requires dedicated review. This analysis is a prerequisite for deployment, covering algebraic attacks, round number adequacy, and the dual-ticket independence property.
+2. **Mode A collision resistance.** If Mode A is adopted (Width-24 compression for STARK Merkle trees, §5.1), collision resistance of the specific configuration (t=24, M31, compression) should be confirmed within the Poseidon2 paper's framework [3]. Mode B (Width-16 sponge) avoids this requirement entirely.
 
 3. **Hard fork governance.** Transitioning from kHeavyHash to Poseidon2 renders existing kHeavyHash ASICs obsolete and requires community consensus.
 
