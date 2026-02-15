@@ -196,7 +196,7 @@ OUTPUT (24 = 8+8+8, all visible):
   S[16..23]  → pow_hash₂      PoW ticket 2 (248 bits)
 ```
 
-Symmetric 8+8+8 I/O with zero waste. No capacity elements — compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and PRP properties (see §4.2.4).
+Symmetric 8+8+8 I/O with no unused output elements. No capacity elements — compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and PRP properties (see §4.2.4).
 
 **Dual-use property:**
 
@@ -376,7 +376,7 @@ Difficulty adjusts to total network hashrate. When all N miners use the same des
 ZK-PoUW revenue = B/N + Z×F   >   B/N = Pure PoW revenue    (for any ZF > 0)
 ```
 
-Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more mining revenue per watt in a mixed network. Once ZK fee income Z×F exceeds this margin, ZK-PoUW strictly dominates. As the network grows (N → ∞), per-miner mining reward → 0 while ZK fees remain constant, making ZK-PoUW the eventual equilibrium. In the interim (ZF ≈ 0), ZK-PoUW ASICs function as standard PoW miners with no penalty.
+Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more mining revenue per watt in a mixed network. Once ZK fee income Z×F exceeds this margin, ZK-PoUW dominates. The crossover point depends on Kaspa's ZK market development, network growth trajectory, and adoption dynamics — detailed economic modeling is required for quantitative predictions.
 
 ---
 
@@ -394,20 +394,7 @@ Poseidon2 [3] maintains 128-bit security with capacity c = 8 M31 elements (248 b
 | STARK | Poseidon2 | Poseidon2 |
 | Independence | PoW ≠ STARK | PoW = STARK |
 
-**Risk:** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously.
-
-**Mitigating factors:**
-- StarkWare's Starknet accepts identical risk (entire L2 depends on Poseidon2)
-- Active cryptanalysis community monitors algebraic hash functions
-- Kaspa's modular architecture permits hash function upgrade via hard fork
-- No known viable attack exists against Poseidon2 with recommended parameters
-
-**Emergency response:** If a Poseidon2 weakness is discovered:
-- Immediate: Increase difficulty to offset any attack advantage
-- Short-term: Hard fork to fallback hash (e.g., Blake3-PoW) using the control logic already present in the ASIC's I/O path
-- Medium-term: Deploy replacement algebraic hash with ASIC firmware update (if the vulnerability is specific to Poseidon2 constants rather than the algebraic structure)
-
-**Assessment:** Accepted risk, shared with the broader Poseidon2 ecosystem. The benefit (mining ASIC = ZK prover) outweighs the concentration risk, particularly if Kaspa adopts Stwo as its ZK backend.
+**Risk:** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously. This concentration risk is shared with the broader Poseidon2 ecosystem (notably Starknet).
 
 ### 7.3 Non-Standard Width and Mode
 
@@ -439,7 +426,7 @@ Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the sam
 P(valid) = 1 - (1 - T/2^248)² ≈ 2T/2^248    for small T/2^248
 ```
 
-This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area, after accounting for the larger width-24 core). Importantly, a miner cannot selectively publish one ticket while withholding the other — both tickets are deterministic outputs of the same permutation and can be independently verified by any node. This prevents ticket-grinding attacks where a miner might discard unfavorable tickets.
+This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area, after accounting for the larger width-24 core).
 
 ### 7.5 Quantum Resistance
 
@@ -493,9 +480,9 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 |--------|------------------|-----------------|-------------------|
 | A | Every block | +3–5 MB/s | Yes (strict) |
 | B | Every N blocks | +50 KB/s (N=100) | Partial |
-| **C** | **None** | **None** | **Practical (U≈67% when ZK active)** |
+| **C** | **None** | **None** | **Market-driven (U≈67% when ZK active)** |
 
-Option C was selected because it preserves Kaspa's existing bandwidth profile while enabling PoUW through economic incentives rather than protocol enforcement. U ≈ 67% when ZK demand exists (miners voluntarily run Stwo); U = 0% when no ZK demand (pure PoW fallback).
+Option C was selected because it preserves Kaspa's existing bandwidth profile while enabling PoUW through economic incentives rather than protocol enforcement.
 
 ### 8.3 Relationship to Ball et al.
 
@@ -519,15 +506,13 @@ ZK-PoUW does not satisfy Ball et al.'s strict definition (0 of 3 criteria). It s
 
 4. **Mining pool protocol.** The 64-byte nonce (vs current 8-byte) requires updates to the stratum protocol for nonce range distribution. Stratum V2 may accommodate this natively.
 
-5. **ZK market maturity.** The economic advantage of ZK-PoUW over Pure PoW depends on sufficient ZK proof demand. The timeline for this market to develop is uncertain, though ZK-PoUW ASICs function as standard PoW miners in the interim.
+5. **ZK market maturity.** The economic advantage of ZK-PoUW over Pure PoW depends on sufficient ZK proof demand. The timeline for this market to develop is uncertain and requires dedicated economic modeling.
 
 6. **Complementary bottleneck validation.** The claim that PoW (compute-bound) and STARK (memory-bound) can run simultaneously at full throughput requires hardware-level validation on actual ASIC designs.
 
-7. **Compression function security.** This proposal uses Poseidon2 in compression function mode (all 24 state elements visible), unlike Stwo's standard sponge mode (8 capacity elements hidden). While compression mode is recommended by the Poseidon2 paper [3] and widely used for Merkle trees, the specific configuration (width 24 over M31, no capacity, dual PoW tickets) requires dedicated security analysis.
+7. **Stwo verifier compatibility.** Standard Stwo verifiers using width-16 sponge cannot directly verify commitments produced by the width-24 compression function. Two integration modes are defined in §5.1: Mode A (width-24 compression, requires modified verifier) and Mode B (width-16 sponge emulation, standard compatible). Both produce identical ZK throughput (SRAM-bound). The choice depends on Stwo's upstream willingness to accept width-24 as a configuration option.
 
-8. **Stwo verifier compatibility.** Standard Stwo verifiers using width-16 sponge cannot directly verify commitments produced by the width-24 compression function. Two integration modes are defined in §5.1: Mode A (width-24 compression, requires modified verifier) and Mode B (width-16 sponge emulation, standard compatible). Both produce identical ZK throughput (SRAM-bound). The choice depends on Stwo's upstream willingness to accept width-24 as a configuration option.
-
-9. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
+8. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
 
 ---
 
