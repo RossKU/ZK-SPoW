@@ -138,7 +138,7 @@ Three approaches to integrate header\_hash into the Merkle hash:
 
 **Design B:** Extend to width 20 with header\_hash[4]. Compression function mode, 1 permutation per hash. But 4 output elements are unused (asymmetric 8+8+4 I/O).
 
-**Design C (selected):** Extend to width 24 with header\_hash[8]. Symmetric 8+8+8 I/O — all output elements are useful. **2 PoW tickets per permutation** (S[8..15] and S[16..23]), yielding +67% effective hashrate over Design B despite 17% fewer cores. Header hash security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound (~2.08G hash/sec regardless of width), so the larger cores do not reduce ZK proof generation rate (see §5.6). The width extension cost manifests purely as U = 16/24 ≈ 67% (§2.2).
+**Design C (selected):** Extend to width 24 with header\_hash[8]. Symmetric 8+8+8 I/O — all output elements are useful. **2 PoW tickets per permutation** (S[8..15] and S[16..23]), yielding +67% effective hashrate over Design B despite 17% fewer cores. Header hash security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width, so the larger cores do not reduce ZK proof generation rate (see §5.6). The width extension cost manifests purely as U = 16/24 ≈ 67% (§2.2).
 
 #### 4.2.3 Proposed Extension (Design C)
 
@@ -173,7 +173,7 @@ Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal us
 | Width | 16 | 24 |
 | PoW tickets per hash | 0 | **2** |
 
-Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode **in compute-bound settings**. On the ZK-PoUW ASIC, STARK Merkle throughput is SRAM-bandwidth-bound (~2.08G hash/sec; see §A.5), so this per-permutation efficiency gain does not increase ZK proof rate — it instead frees Poseidon2 cycles for PoW fill. Width 24 is within the paper's analyzed parameter range; ZK security relies on Width-16 sponge (Mode B) which is well-analyzed (see §7.3).
+Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode **in compute-bound settings**. On ASIC implementations, STARK Merkle throughput is typically SRAM-bandwidth-bound (see §A.5), so this per-permutation efficiency gain does not increase ZK proof rate — it instead frees Poseidon2 cycles for PoW fill. Width 24 is within the paper's analyzed parameter range; ZK security relies on Width-16 sponge (Mode B) which is well-analyzed (see §7.3).
 
 ### 4.3 I/O Mapping
 
@@ -286,7 +286,7 @@ Every Poseidon2 invocation in the STARK computation simultaneously:
 | A | Width-24 compression (h\_H in S[16..23]) | 1 | Requires modification | Yes (from every STARK hash) |
 | B | Width-16 sponge emulation (8 elements unused) | 2 | Standard compatible | No (only from PoW fill cycles) |
 
-Both modes produce identical ZK throughput (SRAM-bandwidth-bound at ~2.08G hash/sec). Mode A yields ~10% more PoW fill during STARK operation. This proposal assumes Mode A; Mode B is available as a fallback for Stwo compatibility.
+Both modes produce identical ZK throughput (SRAM-bandwidth-bound). Mode A consumes fewer Poseidon2 cycles per STARK hash, yielding more PoW fill during STARK operation. This proposal assumes Mode A; Mode B is available as a fallback for Stwo compatibility.
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -343,13 +343,13 @@ The simultaneous execution of PoW and STARK is possible because they bottleneck 
 
 | Resource | PoW | STARK | Combined |
 |----------|-----|-------|----------|
-| Poseidon2 cores | **100%** (compute-bound) | ~8% (data-starved) | **~100%** |
+| Poseidon2 cores | **100%** (compute-bound) | Low (SRAM-starved) | **~100%** |
 | NTT unit | 0% (unused) | **100%** | **100%** |
 | SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
 
 PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. This complementary structure is the foundation of the economic analysis in §6.
 
-**Width-neutrality.** Because STARK is memory-bound, the Poseidon2 core width (16 or 24) does not affect ZK proof throughput. Width-24 reduces the fraction of Poseidon2 cycles consumed by STARK (from ~17% with sponge to ~8% with compression), freeing more cycles for PoW fill — but the STARK proof generation rate remains identical at ~2.08G Merkle hashes/sec (see §A.5).
+**Width-neutrality.** Because STARK is memory-bound, the Poseidon2 core width (16 or 24) does not affect ZK proof throughput. Width-24 compression halves the Poseidon2 cycles consumed per STARK Merkle hash (1 permutation vs 2), freeing more cycles for PoW fill — but the STARK proof generation rate remains identical (SRAM-bandwidth-bound; see §A.5 for quantitative analysis).
 
 ---
 
