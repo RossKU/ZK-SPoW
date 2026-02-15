@@ -251,11 +251,13 @@ PoW allocation:    remaining ≈ 91.7%
 |--------|-------|------|
 | Hardware STARK fraction (f) | ~8% | SRAM-bandwidth limited |
 | Hardware PoW fraction | ~92% | Fills idle Poseidon2 cycles |
-| U (usefulness) | **100%** | ZK proof computation = useful work (see §2.2 of main document) |
+| U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §2.2) |
 | STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
 | PoW hashrate | ~50G effective | 25G perm/sec × 2 tickets |
 
-**f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U = 100% because the ASIC is executing ZK proof computation — useful work by definition. The PoW fill cycles provide additional network security as a costless byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization. Higher SRAM bandwidth increases ZK proof *economic throughput* (more proofs/sec) but does not change U.
+**f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U ≈ 67% because 8 of 24 state elements per permutation serve PoW integration (header\_hash, dual tickets) rather than ZK computation. The PoW fill cycles provide additional network security as a low-marginal-cost byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
+
+**Width-neutrality.** Because STARK Merkle throughput is SRAM-bandwidth-limited at ~2.08G hash/sec, using Width-24 compression (1 perm/hash) vs Width-16 sponge (2 perm/hash) produces identical ZK proof rates. Width-24 halves STARK's Poseidon2 consumption (from ~17% to ~8% of core capacity), increasing PoW fill accordingly. Higher SRAM bandwidth increases ZK proof *economic throughput* (more proofs/sec) but does not change U.
 
 ### A.5.4 Increasing STARK Throughput
 
@@ -266,7 +268,7 @@ PoW allocation:    remaining ≈ 91.7%
 | HBM3 8 GB | 1.2 TB/s | ~50% | ~1,560 |
 | HBM3E 16 GB | 2.4 TB/s | ~100% | ~3,120 |
 
-With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof *economic throughput* but does not change U (which is already 100% when Stwo is active) nor does it satisfy Ball et al.'s strict PoUW definition (which requires protocol-level verification of usefulness — absent under Option C).
+With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof *economic throughput* but does not change U (which is bounded by t₀/t = 16/24 ≈ 67%, the width extension overhead). Higher memory bandwidth cannot overcome the fundamental width ratio cost. Ball et al.'s strict PoUW definition (protocol-level verification of usefulness) remains unsatisfied under Option C.
 
 ---
 
