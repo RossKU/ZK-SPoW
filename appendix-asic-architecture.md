@@ -22,7 +22,7 @@
 │  │  │                                                         │     │  │
 │  │  │  ┌─────────┐     ┌──────────────────┐   ┌──────────┐  │     │  │
 │  │  │  │Input MUX│────→│ Poseidon2 Pipeline│──→│Output RTR│  │     │  │
-│  │  │  └──┬──┬───┘     │ [R1][R2]...[R22] │   └──┬───┬───┘  │     │  │
+│  │  │  └──┬──┬───┘     │ [R1][R2]...[R30] │   └──┬───┬───┘  │     │  │
 │  │  │     │  │          └──────────────────┘      │   │       │     │  │
 │  │  │     │  │                                    │   │       │     │  │
 │  │  │  SRAM  nonce                           SRAM  target    │     │  │
@@ -96,25 +96,30 @@ Gate count (M31): 3 × 1,000 = ~3,000 gates
 
 ### A.2.3 MDS Matrix (Poseidon2)
 
-**External rounds** use a block-circulant structure based on M4 = circ(2, 3, 1, 1):
+**External rounds** use a block-circulant structure based on the Stwo/HorizenLabs M4:
 
 ```
+M4 = [[5, 7, 1, 3],
+      [4, 6, 1, 1],
+      [1, 3, 5, 7],
+      [1, 1, 4, 6]]
+
 For each 4-element group:
-  s₀' = 2s₀ + 3s₁ + s₂ + s₃
-  s₁' = s₀ + 2s₁ + 3s₂ + s₃
-  s₂' = s₀ + s₁ + 2s₂ + 3s₃
-  s₃' = 3s₀ + s₁ + s₂ + 2s₃
+  s₀' = 5s₀ + 7s₁ + s₂ + 3s₃
+  s₁' = 4s₀ + 6s₁ + s₂ + s₃
+  s₂' = s₀ + 3s₁ + 5s₂ + 7s₃
+  s₃' = s₀ + s₁ + 4s₂ + 6s₃
 
-  2x = x + x,  3x = x + x + x  → additions only, no multipliers
+  Coefficients ∈ {1,3,4,5,6,7} — all shift+add, no multipliers
 ```
 
-Width 24 = 6 groups of 4 → 6 M4 applications → **additions only** in external MDS.
+Width 24 = 6 groups of 4 → 6 M4 applications → **shift+add only** in external MDS.
 
-**Internal rounds** use sparse MDS: M\_I = diag(μ₁, ..., μ\_t) + **1**·**1**^T:
+**Internal rounds** use sparse MDS: M\_I = **1**·**1**^T + diag(V), where V = [−2, 1, 2, 4, ..., 2²²] (Plonky3 production values [10]):
 
 ```
 sum = s₀ + s₁ + ... + s_{t-1}        // t-1 additions
-s_i' = μ_i · s_i + sum                // t multiplications + t additions
+s_i' = V[i] · s_i + sum               // V[i] ∈ {powers of 2, −2} → shift+add
 
 Width 16 (standard): 16 multiplications per internal round
 Width 24 (extended): 24 multiplications per internal round  (+50%)
@@ -122,22 +127,22 @@ Width 24 (extended): 24 multiplications per internal round  (+50%)
 
 ### A.2.4 Full Round vs Partial Round
 
-| Component | External round (×8) | Internal round (×14) |
+| Component | External round (×8) | Internal round (×22) |
 |-----------|--------------------|--------------------|
 | S-box | t S-boxes (24 × 3K = 72K gates) | 1 S-box (3K gates) |
-| MDS | M4 blocks (additions, ~12K gates) | diag + 1·1^T (24 × 1K = 24K gates) |
+| MDS | M4 blocks (shift+add, ~12K gates) | diag + 1·1^T (24 × 1K = 24K gates) |
 | Round constants | t additions (24 × ~100 = 2.4K) | t additions (2.4K) |
 | **Subtotal** | **~86K gates** | **~29K gates** |
 
 **Total core (pipelined):**
 
 ```
-8 × 86K + 14 × 29K = 688K + 406K = ~1,094K gates per core (Width 24)
+8 × 86K + 22 × 29K = 688K + 638K = ~1,326K gates per core (Width 24)
 
 Standard Width 16:
 8 × 58K + 14 × 21K = 464K + 294K = ~758K gates per core
 
-Overhead: +44% core logic (Width 16 → 24)
+Overhead: +75% core logic (Width 16 → 24)
 ```
 
 ---
@@ -147,32 +152,32 @@ Overhead: +44% core logic (Width 16 → 24)
 ### A.3.1 Folded (Area Minimal)
 
 ```
-1 round of hardware × 22 iterations
+1 round of hardware × 30 iterations
 
 Area: ~86K gates (one external round circuit, shared)
-Throughput: 1 hash / 22 cycles per core
-@ 1 GHz: ~45M perm/sec per core → 90M effective hash/sec (2 tickets)
+Throughput: 1 hash / 30 cycles per core
+@ 1 GHz: ~33M perm/sec per core → 66M effective hash/sec (2 tickets)
 ```
 
 ### A.3.2 Full Pipeline (Throughput Maximal)
 
 ```
-22 stages, all rounds instantiated
+30 stages, all rounds instantiated
 
-Area: ~1.2M gates per core (1,094K logic + 78K registers + 3K control)
+Area: ~1.4M gates per core (1,326K logic + 108K registers + 3K control)
 Throughput: 1 perm / cycle per core (after pipeline fill)
-Latency: 22 cycles
+Latency: 30 cycles
 @ 1 GHz: 1G perm/sec → 2G effective hash/sec (2 tickets)
 ```
 
 ### A.3.3 Partial Pipeline (Balanced)
 
 ```
-k stages × (22/k) iterations
+k stages × (30/k) iterations
 
-k=4: ~300K gates, 1 perm / 5.5 cycles → ~180M perm/sec → 360M eff
-k=8: ~600K gates, 1 perm / 2.75 cycles → ~360M perm/sec → 720M eff
-k=11: ~660K gates, 1 perm / 2 cycles → ~500M perm/sec → 1G eff
+k=5: ~300K gates, 1 perm / 6 cycles → ~167M perm/sec → 334M eff
+k=10: ~550K gates, 1 perm / 3 cycles → ~333M perm/sec → 667M eff
+k=15: ~700K gates, 1 perm / 2 cycles → ~500M perm/sec → 1G eff
 ```
 
 ### A.3.4 Die-Level Comparison
@@ -181,10 +186,10 @@ Assuming 60M gate die, 50% allocated to Poseidon2 cores (30M gates). Each permut
 
 | Pipeline style | Gates/core | Cores | Perm/sec/core | **Effective hash/sec** |
 |---------------|-----------|-------|--------------|----------------------|
-| Folded (×1) | 86K | 348 | 45M | **31.3G** |
-| 4-stage | 300K | 100 | 180M | **36G** |
-| 8-stage | 600K | 50 | 360M | **36G** |
-| Full (×22) | 1.2M | 25 | 1G | **50G** |
+| Folded (×1) | 86K | 348 | 33M | **23G** |
+| 5-stage | 300K | 100 | 167M | **33G** |
+| 10-stage | 550K | 54 | 333M | **36G** |
+| Full (×30) | 1.4M | 21 | 1G | **42G** |
 
 Full pipeline achieves highest throughput. The 2-ticket multiplier makes full pipeline particularly effective.
 
@@ -206,7 +211,7 @@ Per nonce attempt (compression function mode, width 24):
     S[0..7]   ← v₁  (nonce part 1)
     S[8..15]  ← v₂  (nonce part 2)
     S[16..23] ← h_H (from register, constant)
-  → 1 Poseidon2 permutation (22 rounds)
+  → 1 Poseidon2 permutation (30 rounds)
   → output S[8..15] and S[16..23] compared against target (2 tickets)
 ```
 
@@ -214,7 +219,7 @@ Per nonce attempt (compression function mode, width 24):
 
 Hardware for pre-absorption:
 - header\_state register: 8 × 31 bits = 248 bits (~400 gates)
-- Negligible compared to Poseidon2 core (~1.2M gates)
+- Negligible compared to Poseidon2 core (~1.4M gates)
 
 ---
 
@@ -238,34 +243,34 @@ SRAM bandwidth:          ~200 GB/s
 Bytes per STARK hash:    96 bytes
 STARK hash throughput:   200G / 96 ≈ 2.08G hashes/sec
 
-Total Poseidon2 throughput: ~25G perm/sec (25 cores @ 1GHz, Width 24)
-Effective PoW hashrate:    ~50G hash/sec (2 tickets per permutation)
+Total Poseidon2 throughput: ~21G perm/sec (21 cores @ 1GHz, Width 24)
+Effective PoW hashrate:    ~42G hash/sec (2 tickets per permutation)
 
-STARK allocation:  2.08G / 25G ≈ 8.3%
-PoW allocation:    remaining ≈ 91.7%
+STARK allocation:  2.08G / 21G ≈ 9.9%
+PoW allocation:    remaining ≈ 90.1%
 ```
 
 ### A.5.3 Interpretation
 
 | Metric | Value | Note |
 |--------|-------|------|
-| Hardware STARK fraction (f) | ~8% | SRAM-bandwidth limited |
-| Hardware PoW fraction | ~92% | Fills idle Poseidon2 cycles |
+| Hardware STARK fraction (f) | ~10% | SRAM-bandwidth limited |
+| Hardware PoW fraction | ~90% | Fills idle Poseidon2 cycles |
 | U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §2.2) |
 | STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
-| PoW hashrate | ~50G effective | 25G perm/sec × 2 tickets |
+| PoW hashrate | ~42G effective | 21G perm/sec × 2 tickets |
 
 **f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U ≈ 67% because 8 of 24 state elements per permutation serve PoW integration (header\_digest, dual tickets) rather than ZK computation. The PoW cycles provide additional network security as a low-marginal-cost byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
 
-**Width-24 efficiency.** Because STARK Merkle throughput is SRAM-bandwidth-limited at ~2.08G hash/sec, Width-24 compression (1 perm/hash) delivers the same ZK proof rate as Width-16 sponge (2 perm/hash) while consuming half the Poseidon2 cycles (~8% vs ~17% of core capacity). The freed cycles serve PoW. Higher SRAM bandwidth increases ZK proof *economic throughput* (more proofs/sec) but does not change U.
+**Width-24 efficiency.** Because STARK Merkle throughput is SRAM-bandwidth-limited at ~2.08G hash/sec, Width-24 compression (1 perm/hash) delivers the same ZK proof rate as Width-16 sponge (2 perm/hash) while consuming half the Poseidon2 cycles (~10% vs ~20% of core capacity). The freed cycles serve PoW. Higher SRAM bandwidth increases ZK proof *economic throughput* (more proofs/sec) but does not change U.
 
 ### A.5.4 Increasing STARK Throughput
 
 | Memory technology | Bandwidth | f (STARK fraction) | STARK proofs/sec |
 |------------------|-----------|-------------------|-----------------|
-| SRAM 32 MB | 200 GB/s | ~8% | ~260 |
-| SRAM 64 MB | 400 GB/s | ~17% | ~520 |
-| HBM3 8 GB | 1.2 TB/s | ~50% | ~1,560 |
+| SRAM 32 MB | 200 GB/s | ~10% | ~260 |
+| SRAM 64 MB | 400 GB/s | ~20% | ~520 |
+| HBM3 8 GB | 1.2 TB/s | ~60% | ~1,560 |
 | HBM3E 16 GB | 2.4 TB/s | ~100% | ~3,120 |
 
 With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof *economic throughput* but does not change U (which is bounded by t₀/t = 16/24 ≈ 67%, the width extension overhead). Higher memory bandwidth cannot overcome the fundamental width ratio cost.
@@ -292,18 +297,18 @@ round stages) balancing area and throughput for ASIC mining.
 ### A.6.2 Poseidon2-PoW Core (M31, Width 24, Full Pipeline)
 
 ```
-S-box circuits:             ~618K gates
+S-box circuits:             ~642K gates
   External: 24 × 3K × 8 rounds = 576K
-  Internal: 1 × 3K × 14 rounds = 42K
-MDS circuits:               ~432K gates
-  External: 6 M4 blocks × ~2K × 8 rounds = 96K (additions only)
-  Internal: 24 × 1K × 14 rounds = 336K
-Round constant storage:      ~53K gates
-Pipeline registers:          ~78K gates (24 × 31 bits × 21 stage boundaries)
+  Internal: 1 × 3K × 22 rounds = 66K
+MDS circuits:               ~624K gates
+  External: 6 M4 blocks × ~2K × 8 rounds = 96K (shift+add only)
+  Internal: 24 × 1K × 22 rounds = 528K
+Round constant storage:      ~55K gates (214 constants × 31 bits)
+Pipeline registers:          ~108K gates (24 × 31 bits × 29 stage boundaries)
 Input MUX + output router:   ~1K gates
 PoW controller:              ~2K gates (header reg, nonce counter, dual target comparator)
 ─────────────────────────────────────
-Total:                       ~1.2M gates per core
+Total:                       ~1.4M gates per core
 Throughput:                  ~1G perm/sec → 2G effective hash/sec (2 tickets) @ 1GHz
 ```
 
@@ -311,14 +316,14 @@ Throughput:                  ~1G perm/sec → 2G effective hash/sec (2 tickets) 
 
 | Metric | kHeavyHash ASIC | Poseidon2-PoW ASIC (Width 24) |
 |--------|----------------|-------------------------------|
-| Core area | ~150K gates | ~1.2M gates |
-| Cores (60M gate die) | ~380 (95% utilized) | ~25 (50% allocated) |
+| Core area | ~150K gates | ~1.4M gates |
+| Cores (60M gate die) | ~380 (95% utilized) | ~21 (50% allocated) |
 | Throughput per core | ~1G/s | ~1G perm/s → 2G eff/s (2 tickets) |
-| Total chip hashrate | ~380G/s | ~50G/s effective |
+| Total chip hashrate | ~380G/s | ~42G/s effective |
 | ZK proof capability | None | ~260 proofs/sec |
 | Additional components | None | NTT, SRAM, controller |
 
-Poseidon2 has ~7.6× lower PoW hashrate per die than kHeavyHash. **This is absorbed by difficulty adjustment** — all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
+Poseidon2 has ~9× lower PoW hashrate per die than kHeavyHash. **This is absorbed by difficulty adjustment** — all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
 
 ---
 
@@ -331,7 +336,7 @@ Poseidon2 has ~7.6× lower PoW hashrate per die than kHeavyHash. **This is absor
 | Multiplier latency | 2–3 cycles | 1 cycle |
 | Poseidon2 width (extended) | 13 (rate 9, cap 4) | 24 (compression function) |
 | Hash output | 4 × 64 = 256 bits | 8 × 31 = 248 bits |
-| Cores per die (30M gates) | ~23 | ~25 |
+| Cores per die (30M gates) | ~23 | ~21 |
 | STARK ecosystem | Plonky2/Plonky3 | **Stwo (potential Kaspa choice)** |
 
 **M31 is the natural choice** if Kaspa adopts Stwo. The smaller multiplier (1/3.5 area) enables higher core density and hashrate per die, while matching Stwo's field arithmetic exactly.

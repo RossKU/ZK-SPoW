@@ -55,7 +55,7 @@ Kaspa is evaluating StarkWare's **Stwo** [4] as a potential STARK backend for ve
 
 This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — can serve both STARK proof generation and PoW mining. The cost is a Poseidon2 width extension from 16 to 24 elements with increased round count (+44–105% core area, ~+22–50% die area depending on implementation; see §4.2).
 
-**Stwo-Kaspa verifier.** Standard Stwo uses Width-16 Poseidon2 in sponge mode. Width-24 Poseidon2 is a different cryptographic function (different MDS matrix, different S-box count per external round). ZK-SPoW therefore requires a Kaspa-specific verifier supporting Width-24 compression — a parameter change within Poseidon2's design framework [3], not a new cryptographic construction. Since the kHeavyHash → Poseidon2 transition already requires a hard fork with full-node verifier updates, the Width-24 adaptation is an incremental cost.
+**Stwo-Kaspa verifier.** Standard Stwo uses Width-16 Poseidon2 in sponge mode. Width-24 Poseidon2 is a different cryptographic function (different MDS matrix, different round count, different S-box count per external round). ZK-SPoW therefore requires a Kaspa-specific verifier supporting Width-24 compression — a parameter change within Poseidon2's design framework [3], not a new cryptographic construction. Since the kHeavyHash → Poseidon2 transition already requires a hard fork with full-node verifier updates, the Width-24 adaptation is an incremental cost.
 
 ---
 
@@ -159,7 +159,7 @@ Three approaches to integrate header digest into the Merkle hash:
 
 **Design C (selected):** Extend to width 24 with header digest[8]. Symmetric 8+8+8 I/O — all output elements are useful. **2 PoW tickets per permutation** (S[8..15] and S[16..23]), yielding +67% effective hashrate over Design B despite 17% fewer cores. Header digest security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see §5.6). The width extension cost manifests as U = 16/24 ≈ 67% (§2.2). **Requires Stwo-Kaspa verifier** supporting Width-24 compression function mode (see §2.3).
 
-**Design A vs C tradeoff.** Under current SRAM bandwidth (~200 GB/s; §A.5), Design A's smaller Width-16 cores yield more cores per die and higher total PoW hashrate despite 3 perm/hash. However, Design A's 3× permutation cost per STARK hash becomes a bottleneck as memory bandwidth increases: at HBM-class bandwidth (>1 TB/s), STARK saturates Design A's Poseidon2 capacity, leaving minimal room for PoW. Design C's 1 perm/hash scales linearly with bandwidth, maintaining full PoW throughput at any memory tier. Design C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3 absorptions in Design A). The tradeoff: Design A uses well-analyzed Width-16 parameters with no Stwo modification; Design C requires Width-24 verification (§9.2, §9.3) but is future-proof for higher-bandwidth memory architectures.
+**Design A vs C tradeoff.** Under current SRAM bandwidth (~200 GB/s; §A.5), Design A's smaller Width-16 cores yield more cores per die and higher total PoW hashrate despite 3 perm/hash. However, Design A's 3× permutation cost per STARK hash becomes a bottleneck as memory bandwidth increases: at HBM-class bandwidth (>1 TB/s), STARK saturates Design A's Poseidon2 capacity, leaving minimal room for PoW. Design C's 1 perm/hash scales linearly with bandwidth, maintaining full PoW throughput at any memory tier. Design C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3 absorptions in Design A). The tradeoff: Design A uses well-analyzed Width-16 parameters with no Stwo modification; Design C requires a Width-24 Stwo-Kaspa verifier (§9.3) but is future-proof for higher-bandwidth memory architectures.
 
 #### 4.2.3 Proposed Extension (Design C)
 
@@ -197,7 +197,7 @@ Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal us
 | Width | 16 | 24 |
 | PoW tickets per hash | 0 | **2** |
 
-Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode in compute-bound settings. On ASIC implementations, STARK Merkle throughput is typically SRAM-bandwidth-bound (see §A.5), so the per-permutation efficiency gain manifests as more Poseidon2 cycles available for PoW rather than faster ZK proof generation. Width 24 is within the paper's analyzed parameter range.
+Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode in compute-bound settings. On ASIC implementations, STARK Merkle throughput is typically SRAM-bandwidth-bound (see §A.5), so the per-permutation efficiency gain manifests as more Poseidon2 cycles available for PoW rather than faster ZK proof generation. Width 24 is within the paper's analyzed parameter range [3][10].
 
 ### 4.3 I/O Mapping
 
