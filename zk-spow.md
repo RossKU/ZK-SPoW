@@ -25,13 +25,15 @@ Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where 
 2. The verifier can confirm the usefulness
 3. The useful output is bound to the PoW evidence
 
-The fundamental difficulty: PoW requires random exploration (nonce grinding), while useful computation requires specific, deterministic work. Making random exploration useful — the direction all prior PoUW proposals take — is inherently contradictory.
+The fundamental tension: PoW requires random exploration (nonce grinding), while useful computation requires specific, deterministic work. Prior PoUW constructions [1][7][8] achieve provable security for specific problem classes, but require pre-hashing, SNARGs, or domain-specific verification that limits practical deployment in high-throughput blockchains (100 BPS).
 
 **ZK-SPoW inverts this relationship.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a natural mathematical byproduct:
 
-> **Conventional PoUW:** PoW computation → try to make results useful → Ball et al. impossibility
+> **Conventional PoUW:** PoW computation → try to make results useful → fundamental constraints [1]
 >
 > **ZK-SPoW:** Useful ZK computation → PoW tickets as mathematical byproduct → no contradiction
+
+> **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
 The mechanism: STARK proof generation requires millions of Merkle hashes. Each Width-24 Poseidon2 Merkle hash takes (left\_child, right\_child, header\_digest) as input and produces (merkle\_parent, pow\_ticket₁, pow\_ticket₂) as output. The merkle\_parent advances the ZK proof; the PoW tickets are checked against the difficulty target. The miner cannot choose the Merkle inputs — they are determined by the STARK computation. The "random exploration" required for PoW occurs naturally because STARK Merkle tree hashes are pseudorandom from the miner's perspective.
 
@@ -304,7 +306,7 @@ The miner does not choose the Merkle inputs (n\_L, n\_R) — they are determined
 
 **Header digest and Merkle tree.** Because Poseidon2's MDS matrix provides full diffusion, the merkle\_parent output depends on header\_digest. This means the STARK Merkle tree is bound to a specific block header. At ~2G hash/sec, a complete Merkle tree builds within one block interval (10ms at 100 BPS). The Stwo-Kaspa verifier reconstructs Merkle nodes using the same Width-24 compression with the known header\_digest.
 
-**Header freshness.** A STARK proof spans multiple Merkle commitment phases (step 3 and FRI rounds) and takes seconds to complete. The header\_digest is fixed per Merkle tree phase; each phase completes within one block interval (<10ms). Between phases, the header\_digest register updates to the current block. PoW tickets from each phase are valid for that phase's header. In DAGKnight's DAG structure [5], blocks referencing slightly stale headers remain acceptable — parallel block production is normal at 100 BPS.
+**Header freshness.** A STARK proof spans multiple Merkle commitment phases (step 3 and FRI rounds) — typically O(10) phases — and takes seconds to complete (dominated by NTT and trace generation). The header\_digest is fixed per Merkle tree phase; each phase completes within one block interval (<10ms at ~2G hash/sec). Between phases, the header\_digest register updates to the current block. PoW tickets from each phase are valid for that phase's header. In DAGKnight's DAG structure [5], blocks referencing slightly stale headers remain acceptable — parallel block production is normal at 100 BPS.
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -396,6 +398,8 @@ ZK-SPoW revenue = B/N + Z×F   >   B/N = Pure PoW revenue    (for any ZF > 0)
 
 Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more mining revenue per watt in a mixed network. Once ZK fee income Z×F exceeds this margin, ZK-SPoW dominates. The crossover point depends on Kaspa's ZK market development, network growth trajectory, and adoption dynamics — detailed economic modeling is required for quantitative predictions.
 
+**PoW security without ZK demand.** ZK-SPoW does not condition PoW security on ZK demand. When Z×F = 0 (no ZK market), the ASIC operates as a conventional PoW miner with ~10–20% hash/watt disadvantage due to the +22% die area overhead (§4.2.3). Difficulty adjustment absorbs this: in a homogeneous ZK-SPoW network, per-ASIC mining revenue is identical to a homogeneous Pure PoW network. The 22% die overhead is the cost of optionality — it purchases the ability to capture ZK revenue when the market emerges, without sacrificing PoW security in the interim.
+
 ---
 
 ## 7. Security Considerations
@@ -436,7 +440,7 @@ Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the sam
 P(valid) = 1 - (1 - T/2^248)² ≈ 2T/2^248    for small T/2^248
 ```
 
-This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area vs Design B single-ticket, after accounting for the +44% core area of Width-24).
+This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area vs Design B single-ticket (§4.2.2), after accounting for the +44% core area of Width-24).
 
 ### 7.5 Quantum Resistance
 
@@ -444,7 +448,7 @@ Poseidon2's security against quantum adversaries:
 - Grover's algorithm halves the effective hash bits: 248/2 = 124-bit quantum security
 - Comparable to SHA-256 under quantum attack (256/2 = 128 bits)
 - kHeavyHash: 256/2 = 128-bit quantum security
-- **Regression:** 8-bit classical (248 vs 256) / 4-bit quantum (124 vs 128) from the transition
+- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128) from the transition. Both values remain well above the 100-bit security floor considered acceptable for PoW functions.
 
 ---
 
@@ -459,7 +463,7 @@ Five architectures were explored over multiple sessions before converging on ZK-
 | 1 | Core Division (α = 1%) | Practical | U = 1%, cannot claim symbiosis |
 | 2 | Rate-4 Poseidon | Theoretical | FRI cascade cost, timing misalignment |
 | 3 | ZK-Symbiotic (HW multithread) | Best engineering | Not PoUW by Ball et al. (nonce ≠ useful) |
-| 4 | MatMul PoUW (Komargodski) | Domain-specific | O(n³) verification incompatible with 100 BPS |
+| 4 | MatMul PoUW (Komargodski [8]) | Domain-specific | O(n³) verification incompatible with 100 BPS |
 | 5 | Direction C (Pure ZK PoUW) | Unsolved | Fiat-Shamir cascade barrier (open problem) |
 
 The final design synthesizes insights from Architecture #2 (dual-use Poseidon outputs) and Architecture #3 (hardware multithreading with low-cost context switch), while avoiding their individual weaknesses:
@@ -507,9 +511,9 @@ Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. Their
 
 Under their original framework (PoW → useful), ZK-SPoW satisfies 0 of 3 criteria strictly. Under the inverted framing (useful → PoW), the evaluation changes: the STARK computation drives the permutation, PoW tickets are a cryptographically bound byproduct, and the proof is publicly verifiable.
 
-The deeper point: Ball et al.'s impossibility results constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by never attempting to make PoW useful. Instead, useful computation (STARK proving) happens to produce PoW-valid outputs because Poseidon2's pseudorandom outputs naturally fall below the target at the expected rate.
+The deeper point: Ball et al.'s hardness results [1] constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by never attempting to make PoW useful. Instead, useful computation (STARK proving) happens to produce PoW-valid outputs because Poseidon2's pseudorandom outputs naturally fall below the target at the expected rate.
 
-Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within a provably secure PoUW framework. ZK-SPoW differs in two respects: (1) the useful computation is market-driven rather than protocol-mandated (Option C), and (2) PoW tickets emerge as a byproduct of STARK hashing rather than through a separate verification mechanism.
+Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within a provably secure PoUW framework. Komargodski et al. [8][9] explore PoUW via matrix multiplication and external utility functions. ZK-SPoW differs from both: (1) the useful computation is market-driven rather than protocol-mandated (Option C), and (2) PoW tickets emerge as a byproduct of STARK hashing rather than through a separate verification mechanism.
 
 ---
 
@@ -550,3 +554,7 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 [6] Kaspa. "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa
 
 [7] Fitzi, M., Kiayias, A., Panagiotakos, G., & Stouka, A. (2022). "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work." *Crypto 2022*. https://eprint.iacr.org/2021/1379
+
+[8] Komargodski, I., Schen, M., & Weinstein, O. (2025). "Proofs of Useful Work from Arbitrary Matrix Multiplication." *IACR Cryptology ePrint Archive*, 2025/685. https://eprint.iacr.org/2025/685
+
+[9] Bar-On, A., Komargodski, I., & Weinstein, O. (2025). "Proof of Work With External Utilities." arXiv:2505.21685. https://arxiv.org/abs/2505.21685
