@@ -259,6 +259,9 @@ PoW allocation:    remaining ≈ 90.1%
 | U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §2.2) |
 | STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
 | PoW hashrate | ~42G effective | 21G perm/sec × 2 tickets |
+| U\_avg | **≈6.7%** | f × U = 0.10 × 0.67; time-averaged usefulness (see §2.2) |
+
+**Time-averaged usefulness.** U\_avg = f\_sym × U ≈ 0.10 × 0.67 ≈ **6.7%** under 200 GB/s SRAM bandwidth with the STARK prover continuously active. This means 6.7% of all Poseidon2 cycles advance ZK proofs; the remaining 93.3% provide PoW security only. In a conventional PoW network, U\_avg = 0%: all mining energy produces security and nothing else. ZK-SPoW's 6.7% represents computation that would otherwise have no useful output beyond block validation. U\_avg scales with memory bandwidth: ~13% at 400 GB/s, ~40% at 1.2 TB/s (§A.5.4). When the STARK prover is inactive (no ZK demand), U\_avg = 0% and the ASIC operates as a conventional PoW miner.
 
 **f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U ≈ 67% because 8 of 24 state elements per permutation serve PoW integration (header\_digest, dual tickets) rather than ZK computation. The PoW cycles provide additional network security as a low-marginal-cost byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
 
@@ -266,12 +269,12 @@ PoW allocation:    remaining ≈ 90.1%
 
 ### A.5.4 Increasing STARK Throughput
 
-| Memory technology | Bandwidth | f (STARK fraction) | STARK proofs/sec |
-|------------------|-----------|-------------------|-----------------|
-| SRAM 32 MB | 200 GB/s | ~10% | ~260 |
-| SRAM 64 MB | 400 GB/s | ~20% | ~520 |
-| HBM3 8 GB | 1.2 TB/s | ~60% | ~1,560 |
-| HBM3E 16 GB | 2.4 TB/s | ~100% | ~3,120 |
+| Memory technology | Bandwidth | f (STARK fraction) | U\_avg (f × 67%) | STARK proofs/sec |
+|------------------|-----------|-------------------|-----------------|-----------------|
+| SRAM 32 MB | 200 GB/s | ~10% | ~6.7% | ~260 |
+| SRAM 64 MB | 400 GB/s | ~20% | ~13% | ~520 |
+| HBM3 8 GB | 1.2 TB/s | ~60% | ~40% | ~1,560 |
+| HBM3E 16 GB | 2.4 TB/s | ~100% | ~67% | ~3,120 |
 
 With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof *economic throughput* but does not change U (which is bounded by t₀/t = 16/24 ≈ 67%, the width extension overhead). Higher memory bandwidth cannot overcome the fundamental width ratio cost.
 
