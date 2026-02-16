@@ -124,7 +124,7 @@ pow_hash₂ = (S[16], S[17], ..., S[23])            // 8 M31 elements = 248 bits
 valid iff pow_hash₁ < target OR pow_hash₂ < target
 ```
 
-where (v₁, v₂) are 8 M31 elements each (64 bytes total nonce). The permutation operates in **compression function mode** — all 24 input elements are visible (no hidden capacity). This differs from Stwo's standard sponge mode (width 16, rate 8, capacity 8) but is a recommended Poseidon2 usage mode [3]. Each permutation produces **two PoW tickets**, doubling the effective hashrate per permutation.
+where (v₁, v₂) are 8 M31 elements each (64 bytes total nonce). The permutation operates in **compression function mode** — all 24 input elements are visible (no hidden capacity). This differs from Stwo's standard sponge mode (width 16, rate 8, capacity 8) but is a recommended Poseidon2 usage mode [3]. Each permutation produces **two PoW tickets**, doubling the effective hashrate per permutation. The comparison `pow_hash < target` interprets both as 248-bit unsigned integers via big-endian concatenation of 8 M31 elements, each zero-padded to 31 bits.
 
 **Verification cost:** One Poseidon2 permutation (width 24) + two target comparisons + one header pre-hash (amortized).
 
@@ -387,7 +387,7 @@ The simultaneous execution of PoW and STARK is possible because they bottleneck 
 | NTT unit | 0% (unused) | **100%** | **100%** |
 | SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
 
-PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. This complementary structure is the foundation of the economic analysis in §6.
+PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. Under 200 GB/s SRAM bandwidth, the STARK allocation is f\_sym ≈ 10% of Poseidon2 cycles, yielding U\_avg = f\_sym × U ≈ 6.7% time-averaged usefulness (see §A.5 for derivation). This complementary structure is the foundation of the economic analysis in §6.
 
 **Width-24 efficiency.** Width-24 compression uses 1 permutation per Merkle hash versus Width-16 sponge's 2 permutations. This halves STARK's Poseidon2 cycle consumption, freeing more cycles for PoW. The STARK proof generation rate itself remains SRAM-bandwidth-bound (see §A.5 for quantitative analysis).
 
@@ -445,6 +445,8 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity c = 8 M31 e
 ZK-SPoW uses Width-24 Poseidon2 compression function for both STARK Merkle hashing and PoW. Security analysis:
 
 **Collision resistance (STARK binding).** STARK Merkle tree integrity requires collision resistance of the Width-24 compression function. With 248-bit output (8 M31 elements), the birthday bound is 2^124, providing 124-bit collision security. Width-24 provides strictly more state than Width-16 (24 vs 16 elements), resulting in stronger diffusion and larger algebraic degree accumulation. This is within [3]'s analyzed parameter range.
+
+**STARK soundness.** The header\_digest acts as a fixed salt in each Merkle hash: it is determined by the block header before proof generation begins and cannot be chosen adaptively by the prover. STARK soundness therefore reduces to collision resistance of the Width-24 compression function with a fixed third input — a strictly easier assumption than collision resistance under adversarially chosen inputs. The Stwo-Kaspa verifier reconstructs Merkle nodes using the same header\_digest, preserving the binding property.
 
 **Preimage resistance (PoW security).** PoW requires only preimage resistance of the 248-bit output — trivially satisfied by 30 rounds of Poseidon2 (8 external + 22 internal).
 
