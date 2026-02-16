@@ -53,7 +53,7 @@ If a PoW solution is found mid-proof, the block is submitted without interruptin
 
 Kaspa is evaluating StarkWare's **Stwo** [4] as a potential STARK backend for verifiable programs (vProgs). Stwo operates over the Mersenne field M31 and uses **Poseidon2** [3] as its internal hash function for Merkle tree commitments and Fiat-Shamir challenges.
 
-This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — can serve both STARK proof generation and PoW mining. The cost is a Poseidon2 width extension from 16 to 24 elements (+44% core area, ~+22% die area; see §4.2).
+This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — can serve both STARK proof generation and PoW mining. The cost is a Poseidon2 width extension from 16 to 24 elements with increased round count (+44–105% core area, ~+22–50% die area depending on implementation; see §4.2).
 
 **Stwo-Kaspa verifier.** Standard Stwo uses Width-16 Poseidon2 in sponge mode. Width-24 Poseidon2 is a different cryptographic function (different MDS matrix, different S-box count per external round). ZK-SPoW therefore requires a Kaspa-specific verifier supporting Width-24 compression — a parameter change within Poseidon2's design framework [3], not a new cryptographic construction. Since the kHeavyHash → Poseidon2 transition already requires a hard fork with full-node verifier updates, the Width-24 adaptation is an incremental cost.
 
@@ -151,7 +151,7 @@ Three approaches to integrate header digest into the Merkle hash:
 |--------|-------|------|-----------|-------------|-------------|------------|
 | A: 3rd absorb | 16 | Sponge | 3 (+50%) | 1 | 0% | 0% |
 | B: Width 20 | 20 | Compression | 1 | 1 (+4 wasted) | +22% | ~+11% |
-| **C: Width 24** | **24** | **Compression** | **1** | **2** | **+44%** | **~+22%** |
+| **C: Width 24** | **24** | **Compression** | **1** | **2** | **+44–105%** | **~+22–50%** |
 
 **Design A:** No Poseidon2 modification. Standard width-16 sponge with 3 absorptions (left, right, header). 3 permutations per Merkle hash; ZK throughput is unaffected under SRAM-bandwidth-bound operation (§5.6).
 
@@ -176,11 +176,14 @@ Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 | Internal MDS | 16 multiplications (diag + 1·1^T) | 24 multiplications | +50% multiplications |
 | S-box (external) | 16 per round | 24 per round | +50% |
 | S-box (internal) | 1 per round | 1 per round | unchanged |
+| Internal rounds R\_p | 14 | 22 | +57% (see §7.3) |
+| Total rounds | 22 (8+14) | 30 (8+22) | +36% |
+| S-box operations | 142 | 214 | +51% |
 | State registers | 16 × 31 = 496 bits | 24 × 31 = 744 bits | +50% |
 
 Internal round MDS scales as O(t), not O(t²), because the sparse MDS structure (diagonal + rank-1) requires only t multiplications per round. This makes the width extension significantly cheaper than for standard Poseidon.
 
-**Core area overhead: +44%.** Total die area impact: **~+22%** (Poseidon2 is 50% of die; see Appendix A). The 2-ticket property yields **+67% effective hashrate**, partially offsetting the core count reduction. The usefulness cost is U = t₀/t = 16/24 ≈ 67% — the 33% overhead per permutation serves PoW integration, not ZK computation.
+**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** The datapath widens by 50% (24/16), and Width-24 requires R\_p = 22 internal rounds vs Width-16's R\_p = 14 (§7.3), adding +36% pipeline depth (30 vs 22 total rounds). In an iterative (round-reuse) design, core area increases by ~+50% (width only) with 36% more cycles per hash. In a fully pipelined design, core area approximately doubles. Total die area impact: **~+22% to ~+50%** depending on implementation (Poseidon2 is 50% of die; see Appendix A). The 2-ticket property yields **+67% effective hashrate** and S-box cost per PoW ticket *decreases* by 25% (107 vs 142), partially offsetting the core count reduction. The usefulness cost is U = t₀/t = 16/24 ≈ 67% — the 33% overhead per permutation serves PoW integration, not ZK computation.
 
 #### 4.2.4 Compression Function vs Sponge
 
@@ -208,7 +211,7 @@ INPUT (24 = 8+8+8, all visible):
 
           ┌──────────────────────────────────┐
           │   Poseidon2 permutation (t = 24) │
-          │   R_f = 8 external + R_p = 14 int│
+          │   R_f = 8 external + R_p = 22 int│
           └──────────────────────────────────┘
 
 OUTPUT (24 = 8+8+8, all visible):
@@ -405,7 +408,7 @@ ZK-SPoW revenue = B/N + Z×F   >   B/N = Pure PoW revenue    (for any ZF > 0)
 
 Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more mining revenue per watt in a mixed network. Once ZK fee income Z×F exceeds this margin, ZK-SPoW dominates. The crossover point depends on Kaspa's ZK market development, network growth trajectory, and adoption dynamics — detailed economic modeling is required for quantitative predictions.
 
-**PoW security without ZK demand.** ZK-SPoW does not condition PoW security on ZK demand. When Z×F = 0 (no ZK market), the ASIC operates as a conventional PoW miner with ~10–20% hash/watt disadvantage due to the +22% die area overhead (§4.2.3). Difficulty adjustment absorbs this: in a homogeneous ZK-SPoW network, per-ASIC mining revenue is identical to a homogeneous Pure PoW network. The 22% die overhead is the cost of optionality — it purchases the ability to capture ZK revenue when the market emerges, without sacrificing PoW security in the interim.
+**PoW security without ZK demand.** ZK-SPoW does not condition PoW security on ZK demand. When Z×F = 0 (no ZK market), the ASIC operates as a conventional PoW miner with a hash/watt disadvantage due to the die area overhead (§4.2.3). Difficulty adjustment absorbs this: in a homogeneous ZK-SPoW network, per-ASIC mining revenue is identical to a homogeneous Pure PoW network. The die overhead is the cost of optionality — it purchases the ability to capture ZK revenue when the market emerges, without sacrificing PoW security in the interim.
 
 ---
 
@@ -433,13 +436,13 @@ ZK-SPoW uses Width-24 Poseidon2 compression function for both STARK Merkle hashi
 
 **Collision resistance (STARK binding).** STARK Merkle tree integrity requires collision resistance of the Width-24 compression function. With 248-bit output (8 M31 elements), the birthday bound is 2^124, providing 124-bit collision security. Width-24 provides strictly more state than Width-16 (24 vs 16 elements), resulting in stronger diffusion and larger algebraic degree accumulation. This is within [3]'s analyzed parameter range.
 
-**Preimage resistance (PoW security).** PoW requires only preimage resistance of the 248-bit output — trivially satisfied by 22 rounds of Poseidon2.
+**Preimage resistance (PoW security).** PoW requires only preimage resistance of the 248-bit output — trivially satisfied by 30 rounds of Poseidon2 (8 external + 22 internal).
 
-**R\_p sufficiency.** The internal round count R\_p = 14 is inherited from Width-16. Wider state requires non-linear diffusion across more elements; R\_p = 14 may need upward adjustment for Width-24. Formal analysis per [3]'s framework is pending (see §9.2). This is a parameter tuning question, not a structural concern — if R\_p = 14 is insufficient, increasing to 16–18 adds ~5–10% core area.
+**R\_p for Width-24.** The internal round count increases from R\_p = 14 (Width-16) to R\_p = 22 (Width-24) for 128-bit security at D = 5 over M31. This is confirmed by Plonky3's verified round number computation [10], which applies the security constraints from [2][3] plus the algebraic attack bound from Khovratovich et al. (ePrint 2023/537), with a security margin of R\_f += 2, R\_p × 1.075. The binding constraint is statistical (R\_f ≥ 6). Total rounds: 30 (8 + 22) vs 22 (8 + 14) for Width-16. Despite 51% more S-box operations per permutation (214 vs 142), the per-ticket cost *decreases* by 25% (214/2 = 107 vs 142/1 = 142 S-boxes per PoW ticket).
 
 ### 7.4 PoW Hash Distribution
 
-Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The two PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict pow₂ from pow₁ without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 14 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
+Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The two PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict pow₂ from pow₁ without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 22 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
 
 **Dual-ticket mining advantage:** With two 248-bit tickets per permutation, the probability of finding at least one valid PoW per permutation is:
 
@@ -447,7 +450,7 @@ Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the sam
 P(valid) = 1 - (1 - T/2^248)² ≈ 2T/2^248    for small T/2^248
 ```
 
-This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area vs Design B single-ticket (§4.2.2), after accounting for the +44% core area of Width-24).
+This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area vs Design B single-ticket (§4.2.2), after accounting for the increased core area of Width-24 (§4.2.3)).
 
 ### 7.5 Quantum Resistance
 
@@ -528,9 +531,9 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are explicit placeholders — both `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` are uniformly set to `1234` with a TODO comment (`// TODO(shahars): Use poseidon's real constants.`). Final production constants are required before security analysis can be completed.
 
-2. **R\_p sufficiency for Width 24.** The internal round count R\_p = 14 is inherited from Width-16 parameters. Width-24 requires non-linear diffusion across 50% more state elements. Formal analysis per [3]'s algebraic framework is needed to confirm R\_p = 14 provides adequate security margin, or to determine the minimum R\_p for Width-24 (likely 14–18).
+2. **R\_p for Width-24 (resolved).** Plonky3's verified computation [10] confirms R\_p = 22 for Width-24 over M31 at 128-bit security with D = 5, applying all six security constraints (statistical, interpolation, Gröbner 1–3, and the ePrint 2023/537 algebraic attack bound) plus a security margin of R\_f += 2, R\_p × 1.075. The internal MDS matrix diagonal is V = [−2, 1, 2, 4, ..., 2²²] (Plonky3 production values). All powers M\_I^k for k = 1..48 are verified invertible; full characteristic polynomial irreducibility is confirmed by Plonky3's Sage verification. Diffusion analysis confirms full input-to-output dependency from the first external round. Algebraic degree after the full permutation exceeds 2^69, well above the 2^64 threshold for 128-bit interpolation security. The per-ticket S-box cost (107) is 25% lower than Width-16 (142).
 
-3. **Stwo-Kaspa verifier.** Width-24 Poseidon2 compression is a different cryptographic function from Width-16 sponge (different MDS matrix, different S-box count per external round). A Kaspa-specific verifier is required. Implementation is a parameter change within Poseidon2's framework, but requires: (a) Width-24 MDS matrix generation, (b) round constant generation, (c) security certification, (d) integration with Stwo's proof system. StarkWare's willingness to accept Width-24 as an upstream configuration option determines whether this is a lightweight fork or a permanent maintenance burden.
+3. **Stwo-Kaspa verifier.** Width-24 Poseidon2 compression is a different cryptographic function from Width-16 sponge (different MDS matrix, different round count). A Kaspa-specific verifier is required. Plonky3 [10] already provides a production Width-24 Poseidon2 implementation over M31 with verified parameters: external MDS = circ(2M4, M4, M4, M4, M4, M4) where M4 = [[5,7,1,3],[4,6,1,1],[1,3,5,7],[1,1,4,6]]; internal MDS = 1·1ᵀ + diag(V) with V = [−2, 1, 2, 4, ..., 2²²]; R\_f = 8, R\_p = 22. The remaining requirements are: (a) round constant finalization (Grain LFSR or PRNG; both Stwo and Plonky3 currently use non-production constants), (b) integration with Stwo's proof system, (c) independent security certification. StarkWare's willingness to accept Width-24 as an upstream configuration option determines whether this is a lightweight fork or a permanent maintenance burden.
 
 4. **Hard fork governance.** Transitioning from kHeavyHash to Poseidon2 renders existing kHeavyHash ASICs obsolete and requires community consensus.
 
@@ -565,3 +568,5 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 [8] Komargodski, I. & Weinstein, O. (2025). "Proofs of Useful Work from Arbitrary Matrix Multiplication." *IACR Cryptology ePrint Archive*, 2025/685. https://eprint.iacr.org/2025/685
 
 [9] Bar-On, Y., Komargodski, I., & Weinstein, O. (2025). "Proof of Work With External Utilities." arXiv:2505.21685. https://arxiv.org/abs/2505.21685
+
+[10] Plonky3. "A Toolkit for Polynomial IOPs." Width-24 Poseidon2 over M31 implementation and parameter verification. https://github.com/Plonky3/Plonky3
