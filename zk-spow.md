@@ -69,8 +69,8 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 | r | Rate: number of input/output elements (sponge mode) |
 | c | Capacity: security parameter (sponge mode; hidden elements) |
 | n | Hash output size in field elements (n = 8, giving 248 bits) |
-| H | Block header: (parent\_hashes, tx\_merkle\_root, timestamp) |
-| h\_H | Header digest: PoseidonSponge(H) ∈ F\_p^k |
+| H | Block header (all consensus fields; see §4.4) |
+| h\_H | Header digest: PoseidonSponge(H excluding nonce) ∈ F\_p^k |
 | k | Header digest element count (k = 8 for symmetric I/O and dual PoW tickets) |
 | (v\_1, v\_2) | Nonce: v\_1, v\_2 ∈ F\_p^8 |
 | T | Target ∈ F\_p^8 (difficulty-adjusted) |
@@ -109,7 +109,7 @@ where M is a 64×64 matrix (generated from header, full-rank over nibbles), nonc
 **Proposed (Poseidon2-PoW):**
 
 ```
-h_H = PoseidonSponge(H)                          // header pre-hash (8 M31 elements)
+h_H = PoseidonSponge(H excluding nonce)           // amortized pre-hash (8 M31 elements)
 S   = Poseidon2_π(v₁ || v₂ || h_H)              // single permutation, width 24
 pow_hash₁ = (S[8], S[9], ..., S[15])              // 8 M31 elements = 248 bits
 pow_hash₂ = (S[16], S[17], ..., S[23])            // 8 M31 elements = 248 bits
@@ -232,33 +232,40 @@ The same Poseidon2 hardware computes both modes. Only the input source for S[0..
 
 ### 4.4 Block Structure
 
+**Proposed header** (change from current Kaspa in bold):
+
 ```
-Block {
-  header: {
-    parent_hashes:   [Hash; D]        // D DAGKNIGHT parents
-    tx_merkle_root:  Hash
-    timestamp:       u64
-  }
-  nonce: {
-    val1: [F_p; 8]                    // 32 bytes
-    val2: [F_p; 8]                    // 32 bytes
-  }                                    // Total: 64 bytes
-  transactions: [Tx]
+Header {
+  version:                  u16
+  parents_by_level:         [[Hash]]       // DAGKnight multi-level parents
+  hash_merkle_root:         Hash           // transaction Merkle root
+  accepted_id_merkle_root:  Hash
+  utxo_commitment:          Hash
+  timestamp:                u64            // milliseconds
+  bits:                     u32            // difficulty target
+  nonce:                    [F_p; 16]      // **64 bytes (currently u64 = 8 bytes)**
+  daa_score:                u64
+  blue_work:                BlueWorkType
+  blue_score:               u64
+  pruning_point:            Hash
 }
 ```
 
-| Field | kHeavyHash (current) | Poseidon2-PoW (proposed) |
-|-------|---------------------|------------------------|
-| Nonce size | 8 bytes | 64 bytes (+56 bytes) |
-| PoW hash size | 256 bits (32 bytes) | 248 bits (31 bytes) |
-| Block overhead | — | +56 bytes (~0.04% of 125KB block) |
-| Verification | kHeavyHash × 1 | Poseidon2 × 1 |
+The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block, ~0.04% of 125 KB). The nonce maps to Poseidon2 input positions S[0..15] as (v₁, v₂), each 8 M31 elements.
+
+| | kHeavyHash (current) | Poseidon2-PoW (proposed) |
+|---|---|---|
+| Nonce | u64 (8 bytes) | [F\_p; 16] (64 bytes) |
+| PoW function | kHeavyHash → 256-bit | Poseidon2 Width-24 → 248-bit |
+| Block hash | Blake2b-256 → 256-bit | Blake2b-256 → 256-bit (**unchanged**) |
+
+**Block hash vs PoW hash.** Kaspa computes block identity and PoW with separate hash functions. The block hash (Blake2b-256 over the full serialized header including nonce) provides DAG references and block identification — unchanged by this proposal. Only the PoW function is replaced: h\_H = PoseidonSponge(header excluding nonce) is the amortized pre-hash, combined with the nonce in Width-24 Poseidon2 (§4.1). The 248-bit PoW output does not affect the 256-bit block hash.
 
 **STARK proofs are NOT included in the block.** They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3–5 MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100 BPS.
 
 ### 4.5 Header Digest Collision Resistance
 
-The header digest h\_H compresses the variable-length block header into k field elements. If k is too small, an attacker can find two headers H\_A ≠ H\_B with identical h\_H, allowing PoW solutions to be transplanted between conflicting blocks.
+The header digest h\_H compresses the block header (excluding nonce) into k field elements. If k is too small, an attacker can find two headers H\_A ≠ H\_B with identical h\_H, allowing PoW solutions to be transplanted between conflicting blocks.
 
 | k (elements) | Bits | Birthday bound | Security |
 |-------------|------|---------------|----------|
@@ -553,8 +560,8 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 [6] Kaspa. "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa
 
-[7] Fitzi, M., Kiayias, A., Panagiotakos, G., & Stouka, A. (2022). "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work." *Crypto 2022*. https://eprint.iacr.org/2021/1379
+[7] Fitzi, M., Kiayias, A., Panagiotakos, G., & Russell, A. (2022). "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work." *Crypto 2022*. https://eprint.iacr.org/2021/1379
 
-[8] Komargodski, I., Schen, M., & Weinstein, O. (2025). "Proofs of Useful Work from Arbitrary Matrix Multiplication." *IACR Cryptology ePrint Archive*, 2025/685. https://eprint.iacr.org/2025/685
+[8] Komargodski, I. & Weinstein, O. (2025). "Proofs of Useful Work from Arbitrary Matrix Multiplication." *IACR Cryptology ePrint Archive*, 2025/685. https://eprint.iacr.org/2025/685
 
-[9] Bar-On, A., Komargodski, I., & Weinstein, O. (2025). "Proof of Work With External Utilities." arXiv:2505.21685. https://arxiv.org/abs/2505.21685
+[9] Bar-On, Y., Komargodski, I., & Weinstein, O. (2025). "Proof of Work With External Utilities." arXiv:2505.21685. https://arxiv.org/abs/2505.21685
