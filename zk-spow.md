@@ -108,11 +108,13 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 **Current (kHeavyHash):**
 
 ```
-pow_hash = cSHAKE256(M · cSHAKE256(H || nonce) ⊕ cSHAKE256(H || nonce))
+pre_pow_hash = Blake2b(H excluding nonce and timestamp)
+inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || nonce)
+pow_hash     = cSHAKE256_Heavy(M · inner ⊕ inner)
 valid iff pow_hash < target
 ```
 
-where M is a 64×64 matrix (generated from header, full-rank over nibbles), nonce is 8 bytes.
+where M is a 64×64 full-rank matrix over 4-bit nibbles (generated from pre\_pow\_hash via XoShiRo256++), nonce is 8 bytes (u64). The inner hash splits into 64 nibbles for matrix-vector multiplication; `cSHAKE256_PoW` and `cSHAKE256_Heavy` use domain strings `"ProofOfWorkHash"` and `"HeavyHash"` respectively [6].
 
 **Proposed (Poseidon2-PoW):**
 

@@ -160,10 +160,12 @@ Commitment hash & Blake2s (base layer), Poseidon2 (recursive proofs) \\
 
 \textbf{Current (kHeavyHash):}
 \begin{Verbatim}[fontsize=\small]
-pow_hash = cSHAKE256(M * cSHAKE256(H || nonce) XOR cSHAKE256(H || nonce))
+pre_pow_hash = Blake2b(H excluding nonce and timestamp)
+inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || nonce)
+pow_hash     = cSHAKE256_Heavy(M * inner XOR inner)
 valid iff pow_hash < target
 \end{Verbatim}
-where $M$ is a $64\times64$ matrix (generated from header, full-rank over nibbles), nonce is 8 bytes.
+where $M$ is a $64\times64$ full-rank matrix over 4-bit nibbles (generated from \texttt{pre\_pow\_hash} via XoShiRo256++), nonce is 8~bytes (\texttt{u64}). The inner hash splits into 64~nibbles for matrix-vector multiplication; \texttt{cSHAKE256\_PoW} and \texttt{cSHAKE256\_Heavy} use domain strings \texttt{"ProofOfWorkHash"} and \texttt{"HeavyHash"} respectively~\cite{kaspa}.
 
 \textbf{Proposed (Poseidon2-PoW):}
 \begin{Verbatim}[fontsize=\small]
