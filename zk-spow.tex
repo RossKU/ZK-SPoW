@@ -22,7 +22,7 @@
 \newtheorem{proposition}{Proposition}
 
 % --- Title ---
-\title{\textbf{ZK-SPoW: ZK-Symbiotic Proof of Work for Kaspa}}
+\title{\textbf{ZK-SPoW: ZK-Symbiotic Proof of Work}}
 \author{Anonymous\thanks{Preprint. Work in progress.}}
 \date{February 2026 --- Version 0.3 (Draft)}
 
@@ -31,7 +31,7 @@
 
 % ============================================================
 \begin{abstract}
-We propose replacing Kaspa's kHeavyHash proof-of-work function with a Width-24 Poseidon2 compression function over the Mersenne field $\mathbb{F}_p$, $p = 2^{31}-1$ (M31). Traditional Proof of Useful Work (PoUW) attempts to make PoW computation produce useful results---a direction that Ball et al.~\cite{ball2017} show requires careful construction with practical deployment constraints. ZK-SPoW (ZK-Symbiotic Proof of Work) inverts this relationship: useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a mathematical byproduct. When the ASIC executes STARK proofs (Symbiotic mode), operating Poseidon2 in compression function mode with width~24, every STARK Merkle hash accepts a child pair plus block header digest as input and simultaneously outputs a parent node advancing the ZK proof and three PoW tickets---from a single permutation. The miner does not choose the PoW input (nonce); the STARK computation determines it. This unification carries a cost of $U = t_0/t = 16/24 \approx 67\%$---the remaining 33\% of each permutation serves PoW integration. In return, the same hardware performs both network security and useful computation with zero switching overhead. Width-24 requires a Kaspa-specific STARK verifier supporting Width-24 Poseidon2 compression---a parameter change within the Poseidon2 framework, and an incremental cost within the kHeavyHash $\to$ Poseidon2 hard fork. Security claims assume final Poseidon2 production parameters (\S\ref{sec:open}).
+Proof-of-work blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost---a direction Ball et al.~\cite{ball2017} show faces fundamental deployment constraints. ZK-SPoW (ZK-Symbiotic Proof of Work) inverts this relationship: useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a mathematical byproduct. The construction operates Poseidon2 in compression function mode with extended width: in Symbiotic mode, every STARK Merkle hash accepts a child pair plus block header digest as input and simultaneously outputs a parent node advancing the ZK proof and multiple PoW tickets---from a single permutation. The miner does not choose the PoW input (nonce); the STARK computation determines it. Per-permutation usefulness is $U = t_0/t$ ($t_0$ useful elements in a width-$t$ state); the remainder serves PoW integration. PoW mining (compute-bound) and STARK proving (memory-bound) share the same Poseidon2 hardware with zero switching overhead. The protocol is hardware-agnostic and applicable to any PoW chain adopting Poseidon2-based STARKs. We instantiate ZK-SPoW for Kaspa, replacing kHeavyHash with Width-24 Poseidon2 over the Mersenne field $\mathbb{F}_p$, $p = 2^{31}-1$ (M31), achieving $U = 16/24 \approx 67\%$ with three tickets per permutation. A chain-specific STARK verifier supporting the extended width is required---a parameter change within Poseidon2's framework, not a new cryptographic construction. Security claims assume final Poseidon2 production parameters (\S\ref{sec:open}).
 \end{abstract}
 
 % ============================================================
@@ -98,6 +98,8 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 
 \item \textbf{Complementary bottleneck architecture.} We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) can share Poseidon2 hardware with zero-cycle switching overhead, and provide gate-level ASIC architecture analysis for a 7\,nm implementation (\S\ref{sec:modes}, Appendix~\ref{app:asic}).
 \end{enumerate}
+
+\textbf{Generality.} The ZK-SPoW construction---width-extended Poseidon2 compression yielding PoW tickets as a STARK byproduct---is hardware-agnostic and not specific to Kaspa. Any PoW blockchain adopting Poseidon2-based STARKs can apply the same approach. We present Kaspa as the concrete instantiation throughout: its planned Stwo integration, existing ASIC mining ecosystem, and 100~BPS throughput make it a compelling first target. The ASIC analysis (Appendix~\ref{app:asic}) demonstrates optimal-case efficiency on purpose-built hardware; the protocol functions identically on GPUs and FPGAs at proportionally lower throughput.
 
 % ============================================================
 \section{Notation and Definitions}
