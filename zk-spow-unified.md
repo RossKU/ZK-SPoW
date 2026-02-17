@@ -12,7 +12,7 @@ Proof-of-work blockchains expend energy solely for network security. Proof of Us
 
 ## 1. Introduction
 
-We develop ZK-SPoW as a general framework and instantiate it for **Kaspa**, a PoW blockchain achieving real-time decentralization (RTD) at 100 blocks per second via the PHANTOM/GhostDAG protocol [11]. Kaspa's planned integration of StarkWare's Stwo STARK prover and its existing ASIC mining ecosystem make it a natural first candidate for PoW/STARK symbiosis.
+We develop ZK-SPoW as a general framework and instantiate it for **Kaspa**, a PoW blockchain achieving real-time decentralization (RTD) at 100 blocks per second via the DAG KNIGHT protocol [5]. Kaspa is evaluating StarkWare's Stwo — a high-performance STARK prover native to Poseidon2 over M31 — making it a natural first candidate for PoW/STARK symbiosis.
 
 ### 1.1 The PoW Energy Problem
 
@@ -1038,5 +1038,3 @@ The quantity q = 1 − (1−p)³ used in §6.4 and Appendix B.3 is exact under P
 [9] Bar-On, Y., Komargodski, I., & Weinstein, O. (2025). "Proof of Work With External Utilities." arXiv:2505.21685. https://arxiv.org/abs/2505.21685
 
 [10] Plonky3. "A Toolkit for Polynomial IOPs." `poseidon2/src/round_numbers.rs`, `mersenne-31/src/poseidon2.rs`. https://github.com/Plonky3/Plonky3 (accessed 2026-02-16).
-
-[11] Sompolinsky, Y., Lewenberg, Y., & Zohar, A. (2018). "PHANTOM and GhostDAG: A Scalable Generalization of Nakamoto Consensus." *IACR Cryptology ePrint Archive*, 2018/104. https://eprint.iacr.org/2018/104
