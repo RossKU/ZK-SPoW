@@ -570,7 +570,7 @@ Poseidon2~\cite{poseidon2} provides 128-bit security in sponge mode with capacit
 \toprule
 Component & Current Kaspa & Proposed \\
 \midrule
-PoW & kHeavyHash (cSHAKE256) & Poseidon2 \\
+PoW & kHeavyHash (Blake2b + cSHAKE256) & Poseidon2 \\
 STARK & Poseidon2 & Poseidon2 \\
 Independence & PoW $\neq$ STARK & PoW = STARK \\
 \bottomrule

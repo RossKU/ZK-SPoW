@@ -435,7 +435,7 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity c = 8 M31 e
 
 | Component | Current Kaspa | Proposed |
 |-----------|--------------|----------|
-| PoW | kHeavyHash (cSHAKE256) | Poseidon2 |
+| PoW | kHeavyHash (Blake2b + cSHAKE256) | Poseidon2 |
 | STARK | Poseidon2 | Poseidon2 |
 | Independence | PoW ≠ STARK | PoW = STARK |
 
