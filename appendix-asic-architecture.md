@@ -1,6 +1,6 @@
 # Appendix A: ASIC Architecture Details
 
-**Companion to: ZK-SPoW v0.2**
+**Companion to: ZK-SPoW v0.3**
 
 ---
 
@@ -156,7 +156,7 @@ Overhead: +75% core logic (Width 16 → 24)
 
 Area: ~86K gates (one external round circuit, shared)
 Throughput: 1 hash / 30 cycles per core
-@ 1 GHz: ~33M perm/sec per core → 66M effective hash/sec (2 tickets)
+@ 1 GHz: ~33M perm/sec per core → 100M effective hash/sec (3 tickets)
 ```
 
 ### A.3.2 Full Pipeline (Throughput Maximal)
@@ -167,7 +167,7 @@ Throughput: 1 hash / 30 cycles per core
 Area: ~1.4M gates per core (1,326K logic + 108K registers + 3K control)
 Throughput: 1 perm / cycle per core (after pipeline fill)
 Latency: 30 cycles
-@ 1 GHz: 1G perm/sec → 2G effective hash/sec (2 tickets)
+@ 1 GHz: 1G perm/sec → 3G effective hash/sec (3 tickets)
 ```
 
 ### A.3.3 Partial Pipeline (Balanced)
@@ -175,23 +175,23 @@ Latency: 30 cycles
 ```
 k stages × (30/k) iterations
 
-k=5: ~300K gates, 1 perm / 6 cycles → ~167M perm/sec → 334M eff
-k=10: ~550K gates, 1 perm / 3 cycles → ~333M perm/sec → 667M eff
-k=15: ~700K gates, 1 perm / 2 cycles → ~500M perm/sec → 1G eff
+k=5: ~300K gates, 1 perm / 6 cycles → ~167M perm/sec → 500M eff
+k=10: ~550K gates, 1 perm / 3 cycles → ~333M perm/sec → 1G eff
+k=15: ~700K gates, 1 perm / 2 cycles → ~500M perm/sec → 1.5G eff
 ```
 
 ### A.3.4 Die-Level Comparison
 
-Assuming 60M gate die, 50% allocated to Poseidon2 cores (30M gates). Each permutation produces **2 PoW tickets**:
+Assuming 60M gate die, 50% allocated to Poseidon2 cores (30M gates). Each permutation produces **3 PoW tickets**:
 
 | Pipeline style | Gates/core | Cores | Perm/sec/core | **Effective hash/sec** |
 |---------------|-----------|-------|--------------|----------------------|
-| Folded (×1) | 86K | 348 | 33M | **23G** |
-| 5-stage | 300K | 100 | 167M | **33G** |
-| 10-stage | 550K | 54 | 333M | **36G** |
-| Full (×30) | 1.4M | 21 | 1G | **42G** |
+| Folded (×1) | 86K | 348 | 33M | **35G** |
+| 5-stage | 300K | 100 | 167M | **50G** |
+| 10-stage | 550K | 54 | 333M | **54G** |
+| Full (×30) | 1.4M | 21 | 1G | **63G** |
 
-Full pipeline achieves highest throughput. The 2-ticket multiplier makes full pipeline particularly effective.
+Full pipeline achieves highest throughput. The 3-ticket multiplier makes full pipeline particularly effective.
 
 ---
 
@@ -212,7 +212,7 @@ Per nonce attempt (compression function mode, width 24):
     S[8..15]  ← v₂  (nonce part 2)
     S[16..23] ← h_H (from register, constant)
   → 1 Poseidon2 permutation (30 rounds)
-  → output S[8..15] and S[16..23] compared against target (2 tickets)
+  → output S[0..7], S[8..15], and S[16..23] compared against target (3 tickets)
 ```
 
 **Cost per nonce: exactly 1 Poseidon2 permutation.** Header pre-hash is amortized across ~10M nonce attempts per header change.
@@ -244,7 +244,7 @@ Bytes per STARK hash:    96 bytes
 STARK hash throughput:   200G / 96 ≈ 2.08G hashes/sec
 
 Total Poseidon2 throughput: ~21G perm/sec (21 cores @ 1GHz, Width 24)
-Effective PoW hashrate:    ~42G hash/sec (2 tickets per permutation)
+Effective PoW hashrate:    ~63G hash/sec (3 tickets per permutation)
 
 STARK allocation:  2.08G / 21G ≈ 9.9%
 PoW allocation:    remaining ≈ 90.1%
@@ -258,12 +258,12 @@ PoW allocation:    remaining ≈ 90.1%
 | Hardware PoW fraction | ~90% | Fills idle Poseidon2 cycles |
 | U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §2.2) |
 | STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
-| PoW hashrate | ~42G effective | 21G perm/sec × 2 tickets |
+| PoW hashrate | ~63G effective | 21G perm/sec × 3 tickets |
 | U\_avg | **≈6.7%** | f × U = 0.10 × 0.67; time-averaged usefulness (see §2.2) |
 
 **Time-averaged usefulness.** U\_avg = f\_sym × U ≈ 0.10 × 0.67 ≈ **6.7%** under 200 GB/s SRAM bandwidth with the STARK prover continuously active. This means 6.7% of all Poseidon2 cycles advance ZK proofs; the remaining 93.3% provide PoW security only. In a conventional PoW network, U\_avg = 0%: all mining energy produces security and nothing else. ZK-SPoW's 6.7% represents computation that would otherwise have no useful output beyond block validation. U\_avg scales with memory bandwidth: ~13% at 400 GB/s, ~40% at 1.2 TB/s (§A.5.4). When the STARK prover is inactive (no ZK demand), U\_avg = 0% and the ASIC operates as a conventional PoW miner.
 
-**f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U ≈ 67% because 8 of 24 state elements per permutation serve PoW integration (header\_digest, dual tickets) rather than ZK computation. The PoW cycles provide additional network security as a low-marginal-cost byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
+**f is not waste — it is a throughput allocation metric.** It describes how Poseidon2 cycles are allocated between STARK (memory-bandwidth-limited) and PoW (compute-limited). U ≈ 67% because 8 of 24 input state elements carry header\_digest rather than ZK data. The PoW cycles provide additional network security as a low-marginal-cost byproduct. The two workloads are complementary: PoW is compute-bound, STARK is memory-bound. They share Poseidon2 cores but bottleneck on different resources, achieving near-perfect utilization.
 
 **Width-24 efficiency.** Because STARK Merkle throughput is SRAM-bandwidth-limited at ~2.08G hash/sec, Width-24 compression (1 perm/hash) delivers the same ZK proof rate as Width-16 sponge (2 perm/hash) while consuming half the Poseidon2 cycles (~10% vs ~20% of core capacity). The freed cycles serve PoW. Higher SRAM bandwidth increases ZK proof *economic throughput* (more proofs/sec) but does not change U.
 
@@ -309,10 +309,10 @@ MDS circuits:               ~624K gates
 Round constant storage:      ~55K gates (214 constants × 31 bits)
 Pipeline registers:          ~108K gates (24 × 31 bits × 29 stage boundaries)
 Input MUX + output router:   ~1K gates
-PoW controller:              ~2K gates (header reg, nonce counter, dual target comparator)
+PoW controller:              ~2K gates (header reg, nonce counter, triple target comparator)
 ─────────────────────────────────────
 Total:                       ~1.4M gates per core
-Throughput:                  ~1G perm/sec → 2G effective hash/sec (2 tickets) @ 1GHz
+Throughput:                  ~1G perm/sec → 3G effective hash/sec (3 tickets) @ 1GHz
 ```
 
 ### A.6.3 Chip-Level Comparison
@@ -321,12 +321,12 @@ Throughput:                  ~1G perm/sec → 2G effective hash/sec (2 tickets) 
 |--------|----------------|-------------------------------|
 | Core area | ~150K gates | ~1.4M gates |
 | Cores (60M gate die) | ~380 (95% utilized) | ~21 (50% allocated) |
-| Throughput per core | ~1G/s | ~1G perm/s → 2G eff/s (2 tickets) |
-| Total chip hashrate | ~380G/s | ~42G/s effective |
+| Throughput per core | ~1G/s | ~1G perm/s → 3G eff/s (3 tickets) |
+| Total chip hashrate | ~380G/s | ~63G/s effective |
 | ZK proof capability | None | ~260 proofs/sec |
 | Additional components | None | NTT, SRAM, controller |
 
-Poseidon2 has ~9× lower PoW hashrate per die than kHeavyHash. **This is absorbed by difficulty adjustment** — all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
+Poseidon2 has ~6× lower PoW hashrate per die than kHeavyHash. **This is absorbed by difficulty adjustment** — all miners use the same hash function, so per-miner revenue is determined by hashrate share, not absolute hashrate. The ZK proof capability provides additional revenue unavailable to kHeavyHash miners.
 
 ---
 
@@ -343,3 +343,6 @@ Poseidon2 has ~9× lower PoW hashrate per die than kHeavyHash. **This is absorbe
 | STARK ecosystem | Plonky2/Plonky3 | **Stwo (potential Kaspa choice)** |
 
 **M31 is the natural choice** if Kaspa adopts Stwo. The smaller multiplier (1/3.5 area) enables higher core density and hashrate per die, while matching Stwo's field arithmetic exactly.
+
+---
+
