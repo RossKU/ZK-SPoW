@@ -556,7 +556,7 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 8. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
 
-9. **Trace grinding.** In Symbiotic mode, a miner with freedom in trace generation (input selection, padding) could selectively construct STARK Merkle trees that increase PoW ticket success probability. The grinding advantage is bounded by the miner's degrees of freedom relative to the total Merkle tree size (~10⁶–10⁷ nodes), but requires quantitative analysis.
+9. **Trace grinding (resolved).** Under the PRP assumption on Poseidon2, trace selection does not affect the PoW ticket success distribution. The total number of permutations across all STARK commitment phases (initial Merkle tree plus FRI rounds) is determined by protocol parameters and is invariant under trace selection. Each permutation produces two PoW tickets whose joint success probability q = 1−(1−p)² ≈ 2p, p = T/2^248, is input-independent under PRP. The distribution of valid tickets follows Binomial(M/2, q) where M/2 is the total permutation count — invariant across trace choices. Multi-trial grinding (k distinct traces, selecting the best outcome) incurs (k−1)/k waste from discarded proofs, yielding net loss for k ≥ 2. Header digest (h\_H) selection is equivalent to nonce grinding under PRP. See Appendix B for the full proof.
 
 ---
 
@@ -901,6 +901,80 @@ Poseidon2 has ~9× lower PoW hashrate per die than kHeavyHash. **This is absorbe
 | STARK ecosystem | Plonky2/Plonky3 | **Stwo (potential Kaspa choice)** |
 
 **M31 is the natural choice** if Kaspa adopts Stwo. The smaller multiplier (1/3.5 area) enables higher core density and hashrate per die, while matching Stwo's field arithmetic exactly.
+
+---
+
+## Appendix B: Trace Grinding Analysis
+
+We prove that trace selection in Symbiotic mode provides zero advantage for PoW mining under the PRP assumption on Poseidon2.
+
+### B.1 Assumptions
+
+1. **PRP.** The Poseidon2 permutation π: F\_p^24 → F\_p^24 is a pseudorandom permutation. For any input x, the output π(x) is indistinguishable from uniform over F\_p^24.
+2. **Fixed tree sizes.** Each Merkle commitment phase i (i = 0 for the initial trace commitment, i = 1, ..., m for FRI rounds) has 2Nᵢ − 1 internal nodes, where Nᵢ is determined by the protocol (trace length, blowup factor, FRI folding rate). The values Nᵢ are independent of trace content.
+3. **Fixed header digest.** The header digest h\_H ∈ F\_p^8 is fixed at the start of each Merkle commitment phase and constant throughout that phase.
+
+### B.2 Ticket Count Invariance
+
+Each Poseidon2 permutation in the Merkle tree produces two PoW tickets. The total number of permutations across all STARK phases is:
+
+```
+P = Σᵢ (2Nᵢ − 1)
+```
+
+Since each Nᵢ is a protocol parameter independent of the trace t:
+
+```
+∀ t₁, t₂:  P(t₁) = P(t₂) = P
+```
+
+The miner cannot increase the number of PoW tickets by selecting a different trace.
+
+### B.3 Distribution Invariance
+
+Under PRP, for any distinct inputs x₁, ..., x\_P to the permutation, the outputs π(x₁), ..., π(x\_P) are jointly pseudorandom. In a Merkle tree, all permutation inputs are distinct with overwhelming probability: two nodes sharing the same input (n\_L, n\_R, h\_H) requires a collision in the 248-bit child outputs, which occurs with probability at most C(P,2) · 2^{−248} — negligible for P ≤ 10⁷.
+
+Each permutation produces a pair of PoW tickets. Under PRP, the success event for each permutation (at least one ticket below target T) is a Bernoulli trial with parameter:
+
+```
+q = 1 − (1−p)² ≈ 2p,    p = T / 2^248
+```
+
+This parameter depends only on the target T, not on the permutation input. Since inter-permutation independence holds (distinct inputs under PRP), the number of successful permutations follows:
+
+```
+V ~ Binomial(P, q)
+```
+
+Both parameters (P, q) are trace-independent. Therefore, not only the expectation E[V] = Pq but the *entire distribution* of valid tickets is invariant under trace selection. There is no trace for which the variance is smaller (guaranteeing a hit) or larger.
+
+**Fiat-Shamir cascade.** Trace selection affects FRI round Merkle trees via the Fiat-Shamir challenge dependency on the initial Merkle root. Changing the trace changes all subsequent challenges, folding points, and FRI Merkle trees. However, each FRI tree size Nᵢ is protocol-determined, and PRP ensures each resulting ticket has identical success probability. The argument above extends to all commitment phases.
+
+### B.4 Header Digest Grinding
+
+The miner can produce different header digests h\_H by choosing different parent blocks or transaction sets. With the same trace but a new h\_H, the entire Merkle tree must be rebuilt (cost: P permutations), producing P new permutation pairs. Under PRP, this is functionally equivalent to P pure PoW nonce hashes — identical cost, identical ticket distribution. Moreover, only one h\_H can be used for the STARK proof; the remaining attempts produce PoW tickets but discard the STARK computation. Header digest grinding offers no advantage beyond standard nonce grinding.
+
+### B.5 Multi-Trial Grinding
+
+A miner who computes k distinct traces and selects the one with the most valid PoW tickets:
+
+**Cost:** k × (C\_NTT + C\_trace + P) permutations, where C\_NTT and C\_trace are the NTT and trace generation costs (counted conservatively as zero in the comparison below).
+
+**Benefit:** max(V₁, ..., V\_k) where each Vᵢ ~ Binomial(P, q) independently.
+
+For the same k × P Poseidon2 permutations in pure PoW mode, all tickets are valid (none discarded), yielding V\_PoW ~ Binomial(kP, q).
+
+By linearity, E[V\_PoW] = kPq. The best-of-k selection gives E[max(V₁, ..., V\_k)] ≤ Pq + O(√(log k · Pq(1−q))). For any k ≥ 2:
+
+```
+E[max(V₁, ..., V_k)] < kPq = E[V_PoW]
+```
+
+Multi-trial grinding is strictly dominated by pure PoW. Including the NTT and trace generation overhead (omitted above) makes the comparison strictly worse for grinding.
+
+### B.6 Merkle Tree Feedback Structure
+
+In Width-24 compression, the Merkle parent output S[0..7] becomes an input to the next tree level, and h\_H occupies S[16..23] at every level. This creates structured, non-i.i.d. inputs to successive permutations. Under PRP, the permutation's output distribution is uniform regardless of input structure. The full 30-round Poseidon2 (8 external + 22 internal) provides complete diffusion across all 24 state elements. Any weakness in PRP for structured inputs would constitute a break of Poseidon2 itself — the same assumption underlying the PoW security analysis (§7.3). ∎
 
 ---
 

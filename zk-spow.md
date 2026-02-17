@@ -557,7 +557,7 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 8. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
 
-9. **Trace grinding.** In Symbiotic mode, a miner with freedom in trace generation (input selection, padding) could selectively construct STARK Merkle trees that increase PoW ticket success probability. The grinding advantage is bounded by the miner's degrees of freedom relative to the total Merkle tree size (~10⁶–10⁷ nodes), but requires quantitative analysis.
+9. **Trace grinding (resolved).** Under the PRP assumption on Poseidon2, trace selection does not affect the PoW ticket success distribution. The total number of permutations across all STARK commitment phases (initial Merkle tree plus FRI rounds) is determined by protocol parameters and is invariant under trace selection. Each permutation produces two PoW tickets whose joint success probability q = 1−(1−p)² ≈ 2p, p = T/2^248, is input-independent under PRP. The distribution of valid tickets follows Binomial(M/2, q) where M/2 is the total permutation count — invariant across trace choices. Multi-trial grinding (k distinct traces, selecting the best outcome) incurs (k−1)/k waste from discarded proofs, yielding net loss for k ≥ 2. Header digest (h\_H) selection is equivalent to nonce grinding under PRP. See Appendix B for the full proof.
 
 ---
 
