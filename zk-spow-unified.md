@@ -4,19 +4,19 @@
 
 ---
 
-## 1. Abstract
+## Abstract
 
-We propose replacing Kaspa's kHeavyHash proof-of-work function with a Width-24 Poseidon2 compression function over the Mersenne field M31. Traditional Proof of Useful Work (PoUW) attempts to make PoW computation produce useful results — a direction that Ball et al. [1] show requires careful construction with practical deployment constraints. ZK-SPoW (ZK-Symbiotic Proof of Work) inverts this relationship: useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a mathematical byproduct. By operating Poseidon2 in compression function mode with width 24, every STARK Merkle hash accepts a child pair plus block header digest as input and simultaneously outputs a parent node advancing the ZK proof and three PoW tickets — from a single permutation. The miner does not choose the PoW input; the STARK computation determines it. This unification carries a cost of U = t₀/t = 16/24 ≈ 67% — the remaining 33% of each permutation serves PoW integration. In return, the same hardware performs both network security and useful computation with zero switching overhead. Width-24 requires a Kaspa-specific STARK verifier supporting Width-24 Poseidon2 compression — a parameter change within the Poseidon2 framework, and an incremental cost within the kHeavyHash → Poseidon2 hard fork. Security claims assume final Poseidon2 production parameters (§9.1).
+We propose replacing Kaspa's kHeavyHash proof-of-work function with a Width-24 Poseidon2 compression function over the Mersenne field M31. Traditional Proof of Useful Work (PoUW) attempts to make PoW computation produce useful results — a direction that Ball et al. [1] show requires careful construction with practical deployment constraints. ZK-SPoW (ZK-Symbiotic Proof of Work) inverts this relationship: useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a mathematical byproduct. By operating Poseidon2 in compression function mode with width 24, every STARK Merkle hash accepts a child pair plus block header digest as input and simultaneously outputs a parent node advancing the ZK proof and three PoW tickets — from a single permutation. The miner does not choose the PoW input; the STARK computation determines it. This unification carries a cost of U = t₀/t = 16/24 ≈ 67% — the remaining 33% of each permutation serves PoW integration. In return, the same hardware performs both network security and useful computation with zero switching overhead. Width-24 requires a Kaspa-specific STARK verifier supporting Width-24 Poseidon2 compression — a parameter change within the Poseidon2 framework, and an incremental cost within the kHeavyHash → Poseidon2 hard fork. Security claims assume final Poseidon2 production parameters (§8.1).
 
 ---
 
-## 2. Introduction
+## 1. Introduction
 
-### 2.1 The PoW Energy Problem
+### 1.1 The PoW Energy Problem
 
 Kaspa uses kHeavyHash — cSHAKE256 (Keccak/SHA-3 family) composed with a 64×64 matrix multiplication over 4-bit nibbles — for proof of work. Like all traditional PoW schemes, the computational work produces no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
 
-### 2.2 The PoUW Paradox and Its Inversion
+### 1.2 The PoUW Paradox and Its Inversion
 
 Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where the mining computation simultaneously produces useful output. Their strict definition requires:
 
@@ -44,29 +44,29 @@ We define usefulness as the fraction of each permutation that advances ZK comput
 >
 > The 33% overhead per permutation is the cost of PoW integration: 8 of 24 input state elements carry header\_digest rather than ZK data. This is the inherent price of unifying ZK and PoW into a single permutation — not waste, but the cost of symbiosis. On the output side, all three 8-element regions serve as PoW tickets, and S[0..7] simultaneously advances the ZK proof — the purest form of symbiosis.
 >
-> U is a per-permutation metric. The time-averaged usefulness across all Poseidon2 cycles is U\_avg = f\_sym × U, where f\_sym is the fraction of cycles executing STARK Merkle hashes (determined by memory bandwidth; see §5.6 and §A.5).
+> U is a per-permutation metric. The time-averaged usefulness across all Poseidon2 cycles is U\_avg = f\_sym × U, where f\_sym is the fraction of cycles executing STARK Merkle hashes (determined by memory bandwidth; see §4.6 and §A.5).
 
 If a PoW solution is found mid-proof, the block is submitted without interrupting ZK computation. When no ZK demand exists, the ASIC reverts to pure PoW (U = 0%), identical to any conventional miner.
 
-### 2.3 Stwo and Poseidon2
+### 1.3 Stwo and Poseidon2
 
 Kaspa is evaluating StarkWare's **Stwo** [4] as a potential STARK backend for verifiable programs (vProgs). Stwo operates over the Mersenne field M31 and uses **Poseidon2** [3] as its internal hash function for Merkle tree commitments and Fiat-Shamir challenges.
 
-This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — can serve both STARK proof generation and PoW mining. The cost is a Poseidon2 width extension from 16 to 24 elements with increased round count (+44–105% core area, ~+22–50% die area depending on implementation; see §4.2).
+This creates a unique opportunity: if the PoW hash function is also Poseidon2 over M31, then the mining ASIC's primary computational element — the Poseidon2 pipeline — can serve both STARK proof generation and PoW mining. The cost is a Poseidon2 width extension from 16 to 24 elements with increased round count (+44–105% core area, ~+22–50% die area depending on implementation; see §3.2).
 
 **Stwo-Kaspa verifier.** Standard Stwo uses Width-16 Poseidon2 in sponge mode. Width-24 Poseidon2 is a different cryptographic function (different MDS matrix, different round count, different S-box count per external round). ZK-SPoW therefore requires a Kaspa-specific verifier supporting Width-24 compression — a parameter change within Poseidon2's design framework [3], not a new cryptographic construction. Since the kHeavyHash → Poseidon2 transition already requires a hard fork with full-node verifier updates, the Width-24 adaptation is an incremental cost.
 
-### 2.4 Contributions
+### 1.4 Contributions
 
-1. **PoUW paradox inversion.** We formalize ZK-Symbiotic Proof of Work, a construction where useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographically bound byproduct — inverting the traditional PoUW direction explored by Ball et al. [1], Ofelimos [7], and Komargodski et al. [8][9] (§2.2).
+1. **PoUW paradox inversion.** We formalize ZK-Symbiotic Proof of Work, a construction where useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographically bound byproduct — inverting the traditional PoUW direction explored by Ball et al. [1], Ofelimos [7], and Komargodski et al. [8][9] (§1.2).
 
-2. **Width-24 Poseidon2 parameterization.** We specify Width-24 Poseidon2 over M31 in compression function mode and verify its security parameters: R\_p = 22 internal rounds for 128-bit security with D = 5, confirmed via Plonky3's verified round number computation [10]. The per-ticket S-box cost decreases by 50% compared to Width-16 despite 51% more S-box operations per permutation, due to the triple-ticket structure (§7.3).
+2. **Width-24 Poseidon2 parameterization.** We specify Width-24 Poseidon2 over M31 in compression function mode and verify its security parameters: R\_p = 22 internal rounds for 128-bit security with D = 5, confirmed via Plonky3's verified round number computation [10]. The per-ticket S-box cost decreases by 50% compared to Width-16 despite 51% more S-box operations per permutation, due to the triple-ticket structure (§6.3).
 
-3. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) can share Poseidon2 hardware with zero-cycle switching overhead, and provide gate-level ASIC architecture analysis for a 7nm implementation (§5, Appendix A).
+3. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) can share Poseidon2 hardware with zero-cycle switching overhead, and provide gate-level ASIC architecture analysis for a 7nm implementation (§4, Appendix A).
 
 ---
 
-## 3. Notation and Definitions
+## 2. Notation and Definitions
 
 | Symbol | Definition |
 |--------|-----------|
@@ -76,7 +76,7 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 | r | Rate: number of input/output elements (sponge mode) |
 | c | Capacity: security parameter (sponge mode; hidden elements) |
 | n | Hash output size in field elements (n = 8, giving 248 bits) |
-| H | Block header (all consensus fields; see §4.4) |
+| H | Block header (all consensus fields; see §3.4) |
 | h\_H | Header digest: PoseidonSponge(H excluding nonce) ∈ F\_p^k |
 | k | Header digest element count (k = 8 for symmetric I/O and three PoW tickets) |
 | (v\_1, v\_2) | Nonce: v\_1, v\_2 ∈ F\_p^8 |
@@ -96,13 +96,13 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 | Merkle hash | 2 permutations per node (sponge: absorb left[8], absorb right[8]) |
 | Commitment hash | Blake2s (base layer), Poseidon2 (recursive proofs) |
 
-**Note:** All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (`EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly set to `1234`; see §9.1).
+**Note:** All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (`EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly set to `1234`; see §8.1).
 
 ---
 
-## 4. Protocol Specification
+## 3. Protocol Specification
 
-### 4.1 PoW Function Replacement
+### 3.1 PoW Function Replacement
 
 **Current (kHeavyHash):**
 
@@ -130,13 +130,13 @@ where (v₁, v₂) are 8 M31 elements each (64 bytes total nonce). The permutati
 
 **Verification cost:** One Poseidon2 permutation (width 24) + three target comparisons + one header pre-hash (amortized).
 
-**Standard PoW structure.** ZK-SPoW is conventional hash-based PoW: miners explore a nonce space by computing Poseidon2 permutations and comparing outputs against a difficulty target, identically to Nakamoto-style PoW. The ZK component (Symbiotic mode, §5.1) is an optional revenue source sharing the same hardware — it does not modify the PoW function, security model, or difficulty adjustment. When no ZK demand exists, the ASIC reverts to conventional PoW mining (§5.2) with identical security guarantees.
+**Standard PoW structure.** ZK-SPoW is conventional hash-based PoW: miners explore a nonce space by computing Poseidon2 permutations and comparing outputs against a difficulty target, identically to Nakamoto-style PoW. The ZK component (Symbiotic mode, §4.1) is an optional revenue source sharing the same hardware — it does not modify the PoW function, security model, or difficulty adjustment. When no ZK demand exists, the ASIC reverts to conventional PoW mining (§4.2) with identical security guarantees.
 
-### 4.2 Poseidon2 Width Extension
+### 3.2 Poseidon2 Width Extension
 
 The core design change is extending the Poseidon2 permutation width to accommodate header digest as an additional input, and switching from sponge mode to compression function mode.
 
-#### 4.2.1 Stwo Baseline
+#### 3.2.1 Stwo Baseline
 
 Stwo's Poseidon2 operates in **sponge mode** with width 16:
 
@@ -155,7 +155,7 @@ Absorb right_child[8] → Permute → Squeeze output[8]
 Total: 2 permutations per Merkle hash
 ```
 
-#### 4.2.2 Design Alternatives
+#### 3.2.2 Design Alternatives
 
 Three approaches to integrate header digest into the Merkle hash:
 
@@ -165,15 +165,15 @@ Three approaches to integrate header digest into the Merkle hash:
 | B: Width 20 | 20 | Compression | 1 | 1 (+4 wasted) | +22% | ~+11% |
 | **C: Width 24** | **24** | **Compression** | **1** | **3** | **+44–105%** | **~+22–50%** |
 
-**Design A:** No Poseidon2 modification. Standard width-16 sponge with 3 absorptions (left, right, header). 3 permutations per Merkle hash; ZK throughput is unaffected under SRAM-bandwidth-bound operation (§5.6).
+**Design A:** No Poseidon2 modification. Standard width-16 sponge with 3 absorptions (left, right, header). 3 permutations per Merkle hash; ZK throughput is unaffected under SRAM-bandwidth-bound operation (§4.6).
 
 **Design B:** Extend to width 20 with header digest[4]. Compression function mode, 1 permutation per hash. But 4 output elements are unused (asymmetric 8+8+4 I/O).
 
-**Design C (selected):** Extend to width 24 with header digest[8]. Symmetric 8+8+8 I/O — all output elements are useful. **3 PoW tickets per permutation** (S[0..7], S[8..15], and S[16..23]; S[0..7] doubles as merkle\_parent in Symbiotic mode). Header digest security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see §5.6). The width extension cost manifests as U = 16/24 ≈ 67% (§2.2). **Requires Stwo-Kaspa verifier** supporting Width-24 compression function mode (see §2.3).
+**Design C (selected):** Extend to width 24 with header digest[8]. Symmetric 8+8+8 I/O — all output elements are useful. **3 PoW tickets per permutation** (S[0..7], S[8..15], and S[16..23]; S[0..7] doubles as merkle\_parent in Symbiotic mode). Header digest security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see §4.6). The width extension cost manifests as U = 16/24 ≈ 67% (§1.2). **Requires Stwo-Kaspa verifier** supporting Width-24 compression function mode (see §1.3).
 
-**Design A vs C tradeoff.** Under current SRAM bandwidth (~200 GB/s; §A.5), Design A's smaller Width-16 cores yield more cores per die and higher total PoW hashrate despite 3 perm/hash. However, Design A's 3× permutation cost per STARK hash becomes a bottleneck as memory bandwidth increases: at HBM-class bandwidth (>1 TB/s), STARK saturates Design A's Poseidon2 capacity, leaving minimal room for PoW. Design C's 1 perm/hash scales linearly with bandwidth, maintaining full PoW throughput at any memory tier. Design C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3 absorptions in Design A). The tradeoff: Design A uses well-analyzed Width-16 parameters with no Stwo modification; Design C requires a Width-24 Stwo-Kaspa verifier (§9.3) but is future-proof for higher-bandwidth memory architectures.
+**Design A vs C tradeoff.** Under current SRAM bandwidth (~200 GB/s; §A.5), Design A's smaller Width-16 cores yield more cores per die and higher total PoW hashrate despite 3 perm/hash. However, Design A's 3× permutation cost per STARK hash becomes a bottleneck as memory bandwidth increases: at HBM-class bandwidth (>1 TB/s), STARK saturates Design A's Poseidon2 capacity, leaving minimal room for PoW. Design C's 1 perm/hash scales linearly with bandwidth, maintaining full PoW throughput at any memory tier. Design C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3 absorptions in Design A). The tradeoff: Design A uses well-analyzed Width-16 parameters with no Stwo modification; Design C requires a Width-24 Stwo-Kaspa verifier (§8.3) but is future-proof for higher-bandwidth memory architectures.
 
-#### 4.2.3 Proposed Extension (Design C)
+#### 3.2.3 Proposed Extension (Design C)
 
 ```
 Standard Stwo:    Width t₀ = 16,  Sponge (rate 8, capacity 8)
@@ -188,16 +188,16 @@ Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 | Internal MDS | 16 multiplications (diag + 1·1^T) | 24 multiplications | +50% multiplications |
 | S-box (external) | 16 per round | 24 per round | +50% |
 | S-box (internal) | 1 per round | 1 per round | unchanged |
-| Internal rounds R\_p | 14 | 22 | +57% (see §7.3) |
+| Internal rounds R\_p | 14 | 22 | +57% (see §6.3) |
 | Total rounds | 22 (8+14) | 30 (8+22) | +36% |
 | S-box operations | 142 | 214 | +51% |
 | State registers | 16 × 31 = 496 bits | 24 × 31 = 744 bits | +50% |
 
 Internal round MDS scales as O(t), not O(t²), because the sparse MDS structure (diagonal + rank-1) requires only t multiplications per round. This makes the width extension significantly cheaper than for standard Poseidon.
 
-**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** The datapath widens by 50% (24/16), and Width-24 requires R\_p = 22 internal rounds vs Width-16's R\_p = 14 (§7.3), adding +36% pipeline depth (30 vs 22 total rounds). In an iterative (round-reuse) design, core area increases by ~+50% (width only) with 36% more cycles per hash. In a fully pipelined design, core area approximately doubles. Total die area impact: **~+22% to ~+50%** depending on implementation (Poseidon2 is 50% of die; see Appendix A). The 3-ticket property yields S-box cost per PoW ticket of 214/3 ≈ 71, a *50% decrease* compared to Width-16 (142), partially offsetting the core count reduction. The usefulness cost is U = t₀/t = 16/24 ≈ 67% — the 33% overhead per permutation serves PoW integration, not ZK computation.
+**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** The datapath widens by 50% (24/16), and Width-24 requires R\_p = 22 internal rounds vs Width-16's R\_p = 14 (§6.3), adding +36% pipeline depth (30 vs 22 total rounds). In an iterative (round-reuse) design, core area increases by ~+50% (width only) with 36% more cycles per hash. In a fully pipelined design, core area approximately doubles. Total die area impact: **~+22% to ~+50%** depending on implementation (Poseidon2 is 50% of die; see Appendix A). The 3-ticket property yields S-box cost per PoW ticket of 214/3 ≈ 71, a *50% decrease* compared to Width-16 (142), partially offsetting the core count reduction. The usefulness cost is U = t₀/t = 16/24 ≈ 67% — the 33% overhead per permutation serves PoW integration, not ZK computation.
 
-#### 4.2.4 Compression Function vs Sponge
+#### 3.2.4 Compression Function vs Sponge
 
 Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal uses **compression function mode** where all 24 state elements are visible. Key differences:
 
@@ -211,7 +211,7 @@ Standard Stwo uses sponge mode with 8 hidden capacity elements. This proposal us
 
 Both modes are established Poseidon2 usage modes [3]. The Poseidon2 paper recommends compression function mode for Merkle trees, noting up to 5× efficiency over sponge mode in compute-bound settings. On ASIC implementations, STARK Merkle throughput is typically SRAM-bandwidth-bound (see §A.5), so the per-permutation efficiency gain manifests as more Poseidon2 cycles available for PoW rather than faster ZK proof generation. Width 24 is within the paper's analyzed parameter range [3][10].
 
-### 4.3 I/O Mapping
+### 3.3 I/O Mapping
 
 For a single Poseidon2 permutation with state S ∈ F\_p^24 (compression function mode):
 
@@ -232,9 +232,9 @@ OUTPUT (24 = 8+8+8, all visible):
   S[16..23]  → pow_ticket₂     PoW ticket 2 (248 bits)
 ```
 
-Symmetric 8+8+8 I/O with no unused output elements. No capacity elements — compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and PRP properties (see §4.2.4). S[0..7] serves dual roles: it advances the STARK Merkle tree (as merkle\_parent) and is checked against the PoW target. Reading S[0..7] for PoW comparison does not modify the value used by the STARK computation.
+Symmetric 8+8+8 I/O with no unused output elements. No capacity elements — compression function mode exposes all state elements. Security relies on the Poseidon2 permutation's collision resistance and PRP properties (see §3.2.4). S[0..7] serves dual roles: it advances the STARK Merkle tree (as merkle\_parent) and is checked against the PoW target. Reading S[0..7] for PoW comparison does not modify the value used by the STARK computation.
 
-**Note on full diffusion:** The Poseidon2 permutation mixes all 24 state elements through its MDS matrix every round. All output elements are functions of all input elements — there is no structural separation between output regions. The 8+8+8 labeling is a convention for reading the output, not a property of the permutation. This means merkle\_parent depends on header\_digest, and the Stwo-Kaspa verifier must account for this (see §2.3).
+**Note on full diffusion:** The Poseidon2 permutation mixes all 24 state elements through its MDS matrix every round. All output elements are functions of all input elements — there is no structural separation between output regions. The 8+8+8 labeling is a convention for reading the output, not a property of the permutation. This means merkle\_parent depends on header\_digest, and the Stwo-Kaspa verifier must account for this (see §1.3).
 
 **Dual-use property:**
 
@@ -245,9 +245,9 @@ Symmetric 8+8+8 I/O with no unused output elements. No capacity elements — com
 
 The same Poseidon2 hardware computes both modes. Only the input source for S[0..15] differs (SRAM Merkle data vs random nonces). S[16..23] is always header\_digest. **Each permutation produces 3 PoW tickets** — one from each 8-element output region.
 
-**Note on ticket granularity.** The 3 × 8-element partition is a protocol convention, not a cryptographic constraint. Under PRP, any non-overlapping partition of the 24 output elements yields independent pseudorandom tickets. Finer partitions (e.g., 6 × 4 elements at 124 bits each) increase the ticket count but decrease per-ticket bit-length; difficulty adjustment absorbs the ticket count change, leaving per-miner revenue unchanged (§6.2). The 8-element grouping is selected for compatibility with Stwo's hash output convention (8 M31 elements = 248 bits) and sufficient difficulty target granularity at network scale.
+**Note on ticket granularity.** The 3 × 8-element partition is a protocol convention, not a cryptographic constraint. Under PRP, any non-overlapping partition of the 24 output elements yields independent pseudorandom tickets. Finer partitions (e.g., 6 × 4 elements at 124 bits each) increase the ticket count but decrease per-ticket bit-length; difficulty adjustment absorbs the ticket count change, leaving per-miner revenue unchanged (§5.2). The 8-element grouping is selected for compatibility with Stwo's hash output convention (8 M31 elements = 248 bits) and sufficient difficulty target granularity at network scale.
 
-### 4.4 Block Structure
+### 3.4 Block Structure
 
 **Proposed header** (change from current Kaspa in bold):
 
@@ -276,11 +276,11 @@ The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p;
 | PoW function | kHeavyHash → 256-bit | Poseidon2 Width-24 → 248-bit |
 | Block hash | Blake2b-256 → 256-bit | Blake2b-256 → 256-bit (**unchanged**) |
 
-**Block hash vs PoW hash.** Kaspa computes block identity and PoW with separate hash functions. The block hash (Blake2b-256 over the full serialized header including nonce) provides DAG references and block identification — unchanged by this proposal. Only the PoW function is replaced: h\_H = PoseidonSponge(header excluding nonce) is the amortized pre-hash, combined with the nonce in Width-24 Poseidon2 (§4.1). The 248-bit PoW output does not affect the 256-bit block hash.
+**Block hash vs PoW hash.** Kaspa computes block identity and PoW with separate hash functions. The block hash (Blake2b-256 over the full serialized header including nonce) provides DAG references and block identification — unchanged by this proposal. Only the PoW function is replaced: h\_H = PoseidonSponge(header excluding nonce) is the amortized pre-hash, combined with the nonce in Width-24 Poseidon2 (§3.1). The 248-bit PoW output does not affect the 256-bit block hash.
 
 **STARK proofs are NOT included in the block.** They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3–5 MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100 BPS.
 
-### 4.5 Header Digest Collision Resistance
+### 3.5 Header Digest Collision Resistance
 
 The header digest h\_H compresses the block header (excluding nonce) into k field elements. If k is too small, an attacker can find two headers H\_A ≠ H\_B with identical h\_H, allowing PoW solutions to be transplanted between conflicting blocks.
 
@@ -295,9 +295,9 @@ The header digest h\_H compresses the block header (excluding nonce) into k fiel
 
 ---
 
-## 5. Operating Modes
+## 4. Operating Modes
 
-### 5.1 Symbiotic Mode (Stwo Prover Active)
+### 4.1 Symbiotic Mode (Stwo Prover Active)
 
 When ZK proof demand exists, the ASIC runs the Stwo prover. The STARK proof generation pipeline:
 
@@ -332,7 +332,7 @@ The miner does not choose the Merkle inputs (n\_L, n\_R) — they are determined
 
 **Header freshness.** A STARK proof spans multiple Merkle commitment phases (step 3 and FRI rounds) — typically O(10) phases — and takes seconds to complete (dominated by NTT and trace generation). The header\_digest is fixed per Merkle tree phase; each phase completes within one block interval (<10ms at ~2G hash/sec with ~2.08G hash throughput per phase). Between phases, the header\_digest register updates to the current block. PoW tickets from each phase are valid for that phase's header. Maximum staleness is 1 block (10ms): a PoW ticket found at the end of a Merkle phase references a header\_digest that is at most one block behind the DAG tip. In DAGKnight's DAG structure [5], this is well within tolerance — DAGKnight accepts blocks with parent sets up to k blocks deep (where k is the anticone parameter, typically k ≥ 10 at 100 BPS), and 1-block staleness is indistinguishable from normal parallel block production.
 
-### 5.2 Pure PoW Mode (No ZK Demand)
+### 4.2 Pure PoW Mode (No ZK Demand)
 
 When no ZK proofs are requested:
 
@@ -348,7 +348,7 @@ Identical Poseidon2 pipeline, identical throughput. The only difference is the i
 
 **U = 0%.** No ZK proof is being computed. The ASIC provides network security only, equivalent to any conventional PoW miner. This is not waste — security has value — but it is not useful work in the ZK-SPoW sense.
 
-### 5.3 Linear Mode Transition
+### 4.3 Linear Mode Transition
 
 ```
 ┌─ Poseidon2 Pipeline (always 100% utilized) ──────────────┐
@@ -364,13 +364,13 @@ Identical Poseidon2 pipeline, identical throughput. The only difference is the i
 
 The transition between Symbiotic and Pure PoW is **per-cycle and linear**, not a discrete mode switch. When the Poseidon2 pipeline is executing STARK computation, that cycle is Symbiotic. When SRAM data is not ready, a random nonce hash is substituted and that cycle is PoW. The pipeline is always full — the ratio of Symbiotic to PoW cycles is determined by SRAM bandwidth, not by difficulty or protocol parameters.
 
-### 5.4 Hashrate Invariance
+### 4.4 Hashrate Invariance
 
 > **Proposition.** Total PoW hashrate H is independent of the operating mode.
 >
 > *Argument.* H = N\_cores × throughput\_per\_core. Each core's throughput is 1 hash per pipeline\_depth cycles (fully pipelined), regardless of whether the input is a STARK Merkle pair or a random nonce. Input MUX adds zero latency (combinational logic). Therefore H is constant across Symbiotic, Pure PoW, and any mixed state.
 
-### 5.5 Difficulty Independence
+### 4.5 Difficulty Independence
 
 U is determined by ZK demand and width ratio, not by PoW difficulty.
 
@@ -381,7 +381,7 @@ U is determined by ZK demand and width ratio, not by PoW difficulty.
 
 Difficulty affects how many hashes are needed to find a block, but does not change U. Whether difficulty is 8M or 188G, the ASIC either computes ZK proofs (U ≈ 67%) or grinds nonces (U = 0%). The ratio of STARK-to-PoW cycles within the pipeline is determined by SRAM bandwidth (a hardware constant), not by the network's difficulty target.
 
-### 5.6 Complementary Bottleneck Structure
+### 4.6 Complementary Bottleneck Structure
 
 The simultaneous execution of PoW and STARK is possible because they bottleneck on different resources:
 
@@ -391,15 +391,15 @@ The simultaneous execution of PoW and STARK is possible because they bottleneck 
 | NTT unit | 0% (unused) | **100%** | **100%** |
 | SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
 
-PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. Under 200 GB/s SRAM bandwidth, the STARK allocation is f\_sym ≈ 10% of Poseidon2 cycles, yielding U\_avg = f\_sym × U ≈ 6.7% time-averaged usefulness (see §A.5 for derivation). This complementary structure is the foundation of the economic analysis in §6.
+PoW is compute-bound (limited by Poseidon2 throughput). STARK is memory-bound (limited by SRAM bandwidth feeding Merkle data to Poseidon2). They share Poseidon2 cores but contend on different bottleneck resources, achieving near-perfect utilization of all hardware components simultaneously. Under 200 GB/s SRAM bandwidth, the STARK allocation is f\_sym ≈ 10% of Poseidon2 cycles, yielding U\_avg = f\_sym × U ≈ 6.7% time-averaged usefulness (see §A.5 for derivation). This complementary structure is the foundation of the economic analysis in §5.
 
 **Width-24 efficiency.** Width-24 compression uses 1 permutation per Merkle hash versus Width-16 sponge's 2 permutations. This halves STARK's Poseidon2 cycle consumption, freeing more cycles for PoW. The STARK proof generation rate itself remains SRAM-bandwidth-bound (see §A.5 for quantitative analysis).
 
 ---
 
-## 6. Pareto Analysis
+## 5. Pareto Analysis
 
-### 6.1 Competing Designs
+### 5.1 Competing Designs
 
 Four designs compared under identical die area and power budget:
 
@@ -412,7 +412,7 @@ Four designs compared under identical die area and power budget:
 
 Pure PoW achieves ~1.9× hashrate on a die-area basis (95%/50% Poseidon2 allocation) but produces no ZK proofs (U = 0%). On a hashes-per-watt basis, the gap narrows to ~1.1–1.2× because idle NTT and SRAM contribute static leakage (~10–20% of dynamic power; varies by process node). Pure Stwo uses standard Width-16 cores (U = 100%) but cannot mine. ZK-SPoW achieves U ≈ 67% and mining capability — the 33% usefulness gap is the cost of PoW integration via width extension.
 
-### 6.2 Economic Dominance
+### 5.2 Economic Dominance
 
 Difficulty adjusts to total network hashrate. When all N miners use the same design, per-ASIC mining revenue is B/N regardless of absolute hashrate. The differentiator is ZK revenue:
 
@@ -422,19 +422,19 @@ ZK-SPoW revenue = B/N + Z×F   >   B/N = Pure PoW revenue    (for any ZF > 0)
 
 Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more mining revenue per watt in a mixed network. Once ZK fee income Z×F exceeds this margin, ZK-SPoW dominates. The crossover point depends on Kaspa's ZK market development, network growth trajectory, and adoption dynamics — detailed economic modeling is required for quantitative predictions.
 
-**PoW security without ZK demand.** ZK-SPoW does not condition PoW security on ZK demand. When Z×F = 0 (no ZK market), the ASIC operates as a conventional PoW miner with a hash/watt disadvantage due to the die area overhead (§4.2.3). Difficulty adjustment absorbs this: in a homogeneous ZK-SPoW network, per-ASIC mining revenue is identical to a homogeneous Pure PoW network. The die overhead is the cost of optionality — it purchases the ability to capture ZK revenue when the market emerges, without sacrificing PoW security in the interim.
+**PoW security without ZK demand.** ZK-SPoW does not condition PoW security on ZK demand. When Z×F = 0 (no ZK market), the ASIC operates as a conventional PoW miner with a hash/watt disadvantage due to the die area overhead (§3.2.3). Difficulty adjustment absorbs this: in a homogeneous ZK-SPoW network, per-ASIC mining revenue is identical to a homogeneous Pure PoW network. The die overhead is the cost of optionality — it purchases the ability to capture ZK revenue when the market emerges, without sacrificing PoW security in the interim.
 
 ---
 
-## 7. Security Considerations
+## 6. Security Considerations
 
-### 7.1 Poseidon2 Cryptographic Properties
+### 6.1 Poseidon2 Cryptographic Properties
 
 Poseidon2 [3] provides 128-bit security in sponge mode with capacity c = 8 M31 elements (248 bits). In compression function mode (ZK-SPoW), security relies on collision resistance and preimage resistance of the permutation — well-established properties within the Poseidon2 framework [3]. Known algebraic attack vectors (Gröbner basis, interpolation, differential) have been analyzed for standard parameters. StarkWare has adopted Poseidon2 for production use in Starknet, representing significant implicit endorsement of its security.
 
-**Note:** All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (see §9.1).
+**Note:** All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (see §8.1).
 
-### 7.2 Single Primitive Dependency
+### 6.2 Single Primitive Dependency
 
 | Component | Current Kaspa | Proposed |
 |-----------|--------------|----------|
@@ -444,7 +444,7 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity c = 8 M31 e
 
 **Risk:** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously. This concentration risk is shared with the broader Poseidon2 ecosystem (notably Starknet).
 
-### 7.3 Width-24 Security
+### 6.3 Width-24 Security
 
 ZK-SPoW uses Width-24 Poseidon2 compression function for both STARK Merkle hashing and PoW. Security analysis:
 
@@ -456,7 +456,7 @@ ZK-SPoW uses Width-24 Poseidon2 compression function for both STARK Merkle hashi
 
 **R\_p for Width-24.** The internal round count increases from R\_p = 14 (Width-16) to R\_p = 22 (Width-24) for 128-bit security at D = 5 over M31. This is confirmed by Plonky3's verified round number computation [10], which applies the security constraints from [2][3] plus the algebraic attack bound from Khovratovich et al. (ePrint 2023/537), with a security margin of R\_f += 2, R\_p × 1.075. The binding constraint is statistical (R\_f ≥ 6). Total rounds: 30 (8 + 22) vs 22 (8 + 14) for Width-16. Despite 51% more S-box operations per permutation (214 vs 142), the per-ticket cost *decreases* by 50% (214/3 ≈ 71 vs 142/1 = 142 S-boxes per PoW ticket) due to the triple-ticket structure. Supplementary verification: M\_I^k is invertible for all k = 1..48 (necessary condition for subspace trail resistance [3]). Diffusion analysis confirms full input-to-output dependency from the first external round. Algebraic degree after the full 30-round permutation exceeds 2^69, well above the 2^64 threshold for interpolation security at 128 bits.
 
-### 7.4 PoW Hash Distribution
+### 6.4 PoW Hash Distribution
 
 All three output regions — pow\_ticket₀ = S[0..7], pow\_ticket₁ = S[8..15], pow\_ticket₂ = S[16..23] — are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The three PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict one ticket from another without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 22 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
 
@@ -466,9 +466,9 @@ All three output regions — pow\_ticket₀ = S[0..7], pow\_ticket₁ = S[8..15]
 P(valid) = 1 - (1 - p)³ = 3p - 3p² + p³,    p = T/2^248
 ```
 
-Note that the number of tickets per permutation does not affect mining economics in a homogeneous network: difficulty adjustment absorbs any change in per-permutation success probability, leaving per-miner revenue at B/N (§6.2). The triple-ticket structure is a natural consequence of Width-24's symmetric 8+8+8 output and Stwo's 8-element hash convention, not a hashrate optimization.
+Note that the number of tickets per permutation does not affect mining economics in a homogeneous network: difficulty adjustment absorbs any change in per-permutation success probability, leaving per-miner revenue at B/N (§5.2). The triple-ticket structure is a natural consequence of Width-24's symmetric 8+8+8 output and Stwo's 8-element hash convention, not a hashrate optimization.
 
-### 7.5 Quantum Resistance
+### 6.5 Quantum Resistance
 
 Poseidon2's security against quantum adversaries:
 - Grover's algorithm halves the effective hash bits: 248/2 = 124-bit quantum security
@@ -478,9 +478,9 @@ Poseidon2's security against quantum adversaries:
 
 ---
 
-## 8. Comparison with Prior Work
+## 7. Comparison with Prior Work
 
-### 8.1 Design Evolution
+### 7.1 Design Evolution
 
 Five architectures were explored over multiple sessions before converging on ZK-SPoW:
 
@@ -497,9 +497,9 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 - From #2: The idea that STARK intermediate hashes can serve as PoW tickets
 - From #3: The MUX-based switching between STARK and PoW input sources
 - Resolved #2's FRI cascade problem by treating re-computation as useful work
-- Resolved #3's classification by the PoUW paradox inversion (§2.2)
+- Resolved #3's classification by the PoUW paradox inversion (§1.2)
 
-### 8.2 Key Design Decisions
+### 7.2 Key Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -525,7 +525,7 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 
 Option C was selected because it preserves Kaspa's existing bandwidth profile while enabling symbiotic operation through economic incentives rather than protocol enforcement.
 
-### 8.3 Relationship to Ball et al.
+### 7.3 Relationship to Ball et al.
 
 Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. Their three criteria evaluate whether PoW computation can be redirected toward useful work. ZK-SPoW operates in the inverse direction: **useful computation → PoW output**.
 
@@ -543,11 +543,11 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 ---
 
-## 9. Open Questions
+## 8. Open Questions
 
 1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are explicit placeholders — both `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` are uniformly set to `1234` with a TODO comment (`// TODO(shahars): Use poseidon's real constants.`). Final production constants are required before security analysis can be completed.
 
-2. **R\_p for Width-24 (resolved).** R\_p = 22 confirmed via Plonky3 [10]. See §7.3 for full security analysis.
+2. **R\_p for Width-24 (resolved).** R\_p = 22 confirmed via Plonky3 [10]. See §6.3 for full security analysis.
 
 3. **Stwo-Kaspa verifier.** Width-24 Poseidon2 compression is a different cryptographic function from Width-16 sponge (different MDS matrix, different round count). A Kaspa-specific verifier is required. Plonky3 [10] already provides a production Width-24 Poseidon2 implementation over M31 with verified parameters: external MDS = circ(2M4, M4, M4, M4, M4, M4) where M4 = [[5,7,1,3],[4,6,1,1],[1,3,5,7],[1,1,4,6]]; internal MDS = 1·1ᵀ + diag(V) with V = [−2, 1, 2, 4, ..., 2²²]; R\_f = 8, R\_p = 22. The remaining requirements are: (a) round constant finalization (Grain LFSR or PRNG; both Stwo and Plonky3 currently use non-production constants), (b) integration with Stwo's proof system, (c) independent security certification. StarkWare's willingness to accept Width-24 as an upstream configuration option determines whether this is a lightweight fork or a permanent maintenance burden.
 
@@ -819,10 +819,10 @@ PoW allocation:    remaining ≈ 90.1%
 |--------|-------|------|
 | Hardware STARK fraction (f) | ~10% | SRAM-bandwidth limited |
 | Hardware PoW fraction | ~90% | Fills idle Poseidon2 cycles |
-| U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §2.2) |
+| U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §1.2) |
 | STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
 | PoW hashrate | ~63G effective | 21G perm/sec × 3 tickets |
-| U\_avg | **≈6.7%** | f × U = 0.10 × 0.67; time-averaged usefulness (see §2.2) |
+| U\_avg | **≈6.7%** | f × U = 0.10 × 0.67; time-averaged usefulness (see §1.2) |
 
 **Time-averaged usefulness.** U\_avg = f\_sym × U ≈ 0.10 × 0.67 ≈ **6.7%** under 200 GB/s SRAM bandwidth with the STARK prover continuously active. This means 6.7% of all Poseidon2 cycles advance ZK proofs; the remaining 93.3% provide PoW security only. In a conventional PoW network, U\_avg = 0%: all mining energy produces security and nothing else. ZK-SPoW's 6.7% represents computation that would otherwise have no useful output beyond block validation. U\_avg scales with memory bandwidth: ~13% at 400 GB/s, ~40% at 1.2 TB/s (§A.5.4). When the STARK prover is inactive (no ZK demand), U\_avg = 0% and the ASIC operates as a conventional PoW miner.
 
@@ -979,7 +979,7 @@ Multi-trial grinding is strictly dominated by pure PoW. Including the NTT and tr
 
 ### B.6 Merkle Tree Feedback Structure
 
-In Width-24 compression, the Merkle parent output S[0..7] becomes an input to the next tree level, and h\_H occupies S[16..23] at every level. This creates structured, non-i.i.d. inputs to successive permutations. Under PRP, the permutation's output distribution is uniform regardless of input structure. The full 30-round Poseidon2 (8 external + 22 internal) provides complete diffusion across all 24 state elements. Any weakness in PRP for structured inputs would constitute a break of Poseidon2 itself — the same assumption underlying the PoW security analysis (§7.3). ∎
+In Width-24 compression, the Merkle parent output S[0..7] becomes an input to the next tree level, and h\_H occupies S[16..23] at every level. This creates structured, non-i.i.d. inputs to successive permutations. Under PRP, the permutation's output distribution is uniform regardless of input structure. The full 30-round Poseidon2 (8 external + 22 internal) provides complete diffusion across all 24 state elements. Any weakness in PRP for structured inputs would constitute a break of Poseidon2 itself — the same assumption underlying the PoW security analysis (§6.3). ∎
 
 ### B.7 Triple-Ticket Independence
 
@@ -1001,7 +1001,7 @@ P(A < T ∧ B < T ∧ C < T) = p³
 P(A < T ∨ B < T ∨ C < T) = 1 − (1−p)³ = 3p − 3p² + p³
 ```
 
-The quantity q = 1 − (1−p)³ used in §7.4 and Appendix B.3 is exact under PRP, not an approximation.
+The quantity q = 1 − (1−p)³ used in §6.4 and Appendix B.3 is exact under PRP, not an approximation.
 
 **Implication for mining.** A miner who observes any one ticket gains no information about whether the other two are below target. The only way to evaluate all tickets is to compute the full Poseidon2 permutation — which already produces all three simultaneously. There is no early-termination optimization. In Symbiotic mode, pow\_ticket₀ = merkle\_parent: reading it for PoW comparison does not modify the value used by the STARK Merkle tree.
 
@@ -1009,7 +1009,7 @@ The quantity q = 1 − (1−p)³ used in §7.4 and Appendix B.3 is exact under P
 
 ---
 
-## 10. References
+## 9. References
 
 [1] Ball, M., Rosen, A., Sabin, M., & Vasudevan, P. N. (2017). "Proofs of Useful Work." *IACR Cryptology ePrint Archive*, 2017/203. https://eprint.iacr.org/2017/203
 
