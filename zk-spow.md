@@ -456,10 +456,10 @@ ZK-SPoW uses Width-24 Poseidon2 compression function for both STARK Merkle hashi
 
 Both pow\_hash₁ = S[8..15] and pow\_hash₂ = S[16..23] are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The two PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict pow₂ from pow₁ without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 22 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
 
-**Dual-ticket mining advantage:** Under the PRP assumption on Poseidon2 (see §9.8 for correlation analysis), the two tickets are approximately independent. With two 248-bit tickets per permutation, the probability of finding at least one valid PoW per permutation is:
+**Dual-ticket mining advantage:** Under the PRP assumption on Poseidon2, the two tickets are independent (Appendix B.7). With two 248-bit tickets per permutation, the per-permutation success probability is exact:
 
 ```
-P(valid) = 1 - (1 - T/2^248)² ≈ 2T/2^248    for small T/2^248
+P(valid) = 1 - (1 - p)² = 2p - p²,    p = T/2^248
 ```
 
 This yields +100% improvement in expected block-finding rate per permutation (equivalent to +67% per unit die area vs Design B single-ticket (§4.2.2), after accounting for the increased core area of Width-24 (§4.2.3)).
@@ -555,7 +555,7 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 7. **Complementary bottleneck validation.** The claim that PoW (compute-bound) and STARK (memory-bound) can run simultaneously at full throughput requires hardware-level validation on actual ASIC designs.
 
-8. **Dual-ticket independence.** The two PoW tickets (S[8..15] and S[16..23]) are outputs of the same permutation and thus deterministically linked. While each is individually pseudorandom under PRP assumptions, the correlation should be formally analyzed to confirm no exploitable structure exists.
+8. **Dual-ticket independence (resolved).** Under the PRP assumption, for any fixed input x, the permutation output π(x) is uniformly distributed over F\_p^24. A uniform distribution on the product space F\_p^8 × F\_p^8 × F\_p^8 implies that S[0..7], S[8..15], S[16..23] are mutually independent. The joint success probability q = 1 − (1−p)² = 2p − p² is therefore exact. Any detectable correlation would constitute a PRP distinguisher — equivalent to breaking Poseidon2. See Appendix B.7.
 
 9. **Trace grinding (resolved).** Under the PRP assumption on Poseidon2, trace selection does not affect the PoW ticket success distribution. The total number of permutations across all STARK commitment phases (initial Merkle tree plus FRI rounds) is determined by protocol parameters and is invariant under trace selection. Each permutation produces two PoW tickets whose joint success probability q = 1−(1−p)² ≈ 2p, p = T/2^248, is input-independent under PRP. The distribution of valid tickets follows Binomial(M/2, q) where M/2 is the total permutation count — invariant across trace choices. Multi-trial grinding (k distinct traces, selecting the best outcome) incurs (k−1)/k waste from discarded proofs, yielding net loss for k ≥ 2. Header digest (h\_H) selection is equivalent to nonce grinding under PRP. See Appendix B for the full proof.
 
