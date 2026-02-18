@@ -634,36 +634,6 @@ Poseidon2's security against quantum adversaries:
 \section{Comparison with Prior Work}
 \label{sec:comparison}
 
-\subsection{Design Evolution}
-
-Five architectures were explored over multiple sessions before converging on ZK-SPoW:
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}clll@{}}
-\toprule
-\# & Architecture & Verdict & Primary rejection reason \\
-\midrule
-1 & Core Division ($\alpha = 1\%$) & Practical & $U = 1\%$, cannot claim symbiosis \\
-2 & Rate-4 Poseidon & Theoretical & FRI cascade cost, timing misalignment \\
-3 & ZK-Symbiotic (HW multithread) & Best engineering & Not PoUW by~\cite{ball2017} \\
-4 & MatMul PoUW~\cite{komargodski2025} & Domain-specific & $O(n^3)$ verification, 100~BPS \\
-5 & Direction~C (Pure ZK PoUW) & Unsolved & Fiat-Shamir cascade barrier \\
-\bottomrule
-\end{tabular}
-\caption{Design evolution.}
-\label{tab:evolution}
-\end{table}
-
-The final design synthesizes insights from Architecture~\#2 (dual-use Poseidon outputs) and Architecture~\#3 (hardware multithreading with low-cost context switch), while avoiding their individual weaknesses:
-\begin{itemize}
-\item From \#2: The idea that STARK intermediate hashes can serve as PoW tickets
-\item From \#3: The MUX-based switching between STARK and PoW input sources
-\item Resolved \#2's FRI cascade problem by treating re-computation as useful work
-\item Resolved \#3's classification by the PoUW paradox inversion (\S\ref{sec:pouw-paradox})
-\end{itemize}
-
 \subsection{Key Design Decisions}
 
 \begin{table}[h]

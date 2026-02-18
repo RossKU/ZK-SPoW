@@ -489,26 +489,7 @@ Poseidon2's security against quantum adversaries:
 
 ## 7. Comparison with Prior Work
 
-### 7.1 Design Evolution
-
-Five architectures were explored over multiple sessions before converging on ZK-SPoW:
-
-| # | Architecture | Verdict | Primary rejection reason |
-|---|-------------|---------|------------------------|
-| 1 | Core Division (α = 1%) | Practical | U = 1%, cannot claim symbiosis |
-| 2 | Rate-4 Poseidon | Theoretical | FRI cascade cost, timing misalignment |
-| 3 | ZK-Symbiotic (HW multithread) | Best engineering | Not PoUW by Ball et al. (nonce ≠ useful) |
-| 4 | MatMul PoUW (Komargodski [8]) | Domain-specific | O(n³) verification incompatible with 100 BPS |
-| 5 | Direction C (Pure ZK PoUW) | Unsolved | Fiat-Shamir cascade barrier (open problem) |
-
-The final design synthesizes insights from Architecture #2 (dual-use Poseidon outputs) and Architecture #3 (hardware multithreading with low-cost context switch), while avoiding their individual weaknesses:
-
-- From #2: The idea that STARK intermediate hashes can serve as PoW tickets
-- From #3: The MUX-based switching between STARK and PoW input sources
-- Resolved #2's FRI cascade problem by treating re-computation as useful work
-- Resolved #3's classification by the PoUW paradox inversion (§1.2)
-
-### 7.2 Key Design Decisions
+### 7.1 Key Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -534,7 +515,7 @@ The final design synthesizes insights from Architecture #2 (dual-use Poseidon ou
 
 Option C was selected because it preserves Kaspa's existing bandwidth profile while enabling symbiotic operation through economic incentives rather than protocol enforcement.
 
-### 7.3 Relationship to Ball et al.
+### 7.2 Relationship to Ball et al.
 
 Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. Their three criteria evaluate whether PoW computation can be redirected toward useful work. ZK-SPoW operates in the inverse direction: **useful computation → PoW output**.
 
