@@ -199,6 +199,104 @@ fn vanish_coset(x: u32, log_n: u32) -> u32 {
     t
 }
 
+// ── Circle FFT (CFFT / iCFFT) ─────────────────────────────
+
+/// Forward twiddle factors (y_i, x_i, double_x(x_i), ...) — NOT inverted.
+fn cfft_fwd_twiddles(domain: &CDomain) -> Vec<Vec<u32>> {
+    let half_n = domain.half.len();
+    let mut levels: Vec<Vec<u32>> = Vec::new();
+    levels.push(domain.half.iter().map(|p| p.y).collect());
+    let mut xs: Vec<u32> = domain.half.iter().map(|p| p.x).collect();
+    let mut size = half_n / 2;
+    while size >= 1 {
+        levels.push(xs[..size].to_vec());
+        for x in xs.iter_mut() { *x = CirclePoint::double_x(*x); }
+        size /= 2;
+    }
+    levels
+}
+
+/// iCFFT helper: line levels (recursive).
+fn icfft_line(evals: &[u32], inv_twid: &[Vec<u32>]) -> Vec<u32> {
+    let m = evals.len();
+    if m == 1 { return evals.to_vec(); }
+    let half = m / 2;
+    let mut even = Vec::with_capacity(half);
+    let mut odd = Vec::with_capacity(half);
+    for i in 0..half {
+        let (a, b) = (evals[i], evals[m - 1 - i]);
+        even.push(add(a, b));
+        odd.push(mul(sub(a, b), inv_twid[0][i]));
+    }
+    let ec = icfft_line(&even, &inv_twid[1..]);
+    let oc = icfft_line(&odd, &inv_twid[1..]);
+    let mut r = Vec::with_capacity(m);
+    for i in 0..half { r.push(ec[i]); r.push(oc[i]); }
+    r
+}
+
+/// iCFFT: evaluations on circle domain → circle polynomial coefficients.
+/// Basis: [1, y, x, xy, 2x²-1, (2x²-1)y, (2x²-1)x, ...] (circle Chebyshev).
+fn icfft(evals: &[u32], inv_twid: &[Vec<u32>]) -> Vec<u32> {
+    let n = evals.len();
+    if n == 1 { return evals.to_vec(); }
+    let half = n / 2;
+    let mut even = Vec::with_capacity(half);
+    let mut odd = Vec::with_capacity(half);
+    for i in 0..half {
+        let (a, b) = (evals[i], evals[i + half]);
+        even.push(add(a, b));
+        odd.push(mul(sub(a, b), inv_twid[0][i]));
+    }
+    let ec = icfft_line(&even, &inv_twid[1..]);
+    let oc = icfft_line(&odd, &inv_twid[1..]);
+    let inv_n = inv(n as u32);
+    let mut r = Vec::with_capacity(n);
+    for i in 0..half {
+        r.push(mul(ec[i], inv_n));
+        r.push(mul(oc[i], inv_n));
+    }
+    r
+}
+
+/// CFFT helper: line levels (recursive).
+fn cfft_line(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
+    let m = coeffs.len();
+    if m == 1 { return coeffs.to_vec(); }
+    let half = m / 2;
+    let mut ec = Vec::with_capacity(half);
+    let mut oc = Vec::with_capacity(half);
+    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
+    let ee = cfft_line(&ec, &fwd_twid[1..]);
+    let oe = cfft_line(&oc, &fwd_twid[1..]);
+    let mut r = vec![0u32; m];
+    for i in 0..half {
+        let t = mul(fwd_twid[0][i], oe[i]);
+        r[i] = add(ee[i], t);
+        r[m - 1 - i] = sub(ee[i], t);
+    }
+    r
+}
+
+/// CFFT: circle polynomial coefficients → evaluations on circle domain.
+fn cfft(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
+    let n = coeffs.len();
+    if n == 1 { return coeffs.to_vec(); }
+    let half = n / 2;
+    let mut ec = Vec::with_capacity(half);
+    let mut oc = Vec::with_capacity(half);
+    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
+    let ee = cfft_line(&ec, &fwd_twid[1..]);
+    let oe = cfft_line(&oc, &fwd_twid[1..]);
+    let mut r = vec![0u32; n];
+    for i in 0..half {
+        let t = mul(fwd_twid[0][i], oe[i]);
+        r[i] = add(ee[i], t);
+        r[i + half] = sub(ee[i], t);
+    }
+    r
+}
+
 /// Circle STARK smoke test — verify circle group, domain, and FRI.
 fn circle_smoke_test() {
     let g = CirclePoint::GEN;
@@ -251,7 +349,31 @@ fn circle_smoke_test() {
     for _ in 0..log_n { expected = add(expected, expected); }
     assert_eq!(result[0], expected, "FRI constant fold: {} != {}", result[0], expected);
 
-    println!("  Circle smoke test PASSED (N={}, {} fold levels, vanish OK)", n, twiddles.len());
+    // iCFFT → CFFT roundtrip
+    let inv_tw = fri_twiddles(&dom);
+    let fwd_tw = cfft_fwd_twiddles(&dom);
+    let test_evals: Vec<u32> = (0..n).map(|i| (i as u32 * 17 + 3) % P).collect();
+    let coeffs = icfft(&test_evals, &inv_tw);
+    let recovered = cfft(&coeffs, &fwd_tw);
+    for i in 0..n {
+        assert_eq!(recovered[i], test_evals[i], "roundtrip fail at {}", i);
+    }
+
+    // LDE: interpolate on small domain, evaluate on larger domain
+    let log_lde: u32 = log_n + 2; // 4x blowup
+    let lde_n = 1usize << log_lde;
+    let lde_dom = CDomain::new(log_lde);
+    let lde_fwd = cfft_fwd_twiddles(&lde_dom);
+    let mut padded = vec![0u32; lde_n];
+    padded[..n].copy_from_slice(&coeffs);
+    let lde_evals = cfft(&padded, &lde_fwd);
+    // Verify: vanish_coset(trace domain) != 0 on all LDE points
+    for i in 0..lde_n {
+        let v = vanish_coset(lde_dom.at(i).x, log_n);
+        assert_ne!(v, 0, "LDE pt {} in trace vanish set", i);
+    }
+
+    println!("  Circle smoke test PASSED (N={}, LDE={}, roundtrip OK, vanish OK)", n, lde_n);
 }
 
 // ── Poseidon2 Width-24 ─────────────────────────────────────
