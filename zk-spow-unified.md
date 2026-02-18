@@ -86,6 +86,9 @@ This creates a unique opportunity: if the PoW hash function is also Poseidon2 ov
 | (v\_1, v\_2) | Nonce: v\_1, v\_2 ∈ F\_p^8 |
 | T | Target ∈ F\_p^8 (difficulty-adjusted) |
 | S | Poseidon2 state after permutation, S ∈ F\_p^t |
+| U | Per-permutation usefulness: t₀/t (t₀ useful elements in width-t state) |
+| f\_sym | Fraction of Poseidon2 cycles executing STARK Merkle hashes |
+| U\_avg | Time-averaged usefulness: f\_sym × U |
 
 **Stwo baseline parameters (confirmed from source code [4]):**
 
@@ -553,7 +556,7 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 1. **Stwo production parameters.** The baseline parameters (Width 16, Rate 8, Capacity 8, R\_f = 8, R\_p = 14) are confirmed from source code [4]. However, round constants in the current Stwo implementation are explicit placeholders — both `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` are uniformly set to `1234` with a TODO comment (`// TODO(shahars): Use poseidon's real constants.`). Final production constants are required before security analysis can be completed.
 
-2. **R\_p for Width-24 (resolved).** R\_p = 22 computed via Plonky3's round number formula [10]; independent cryptanalytic verification pending. See §6.3 for full security analysis.
+2. **R\_p for Width-24 (resolved; pending independent verification).** R\_p = 22 computed via Plonky3's round number formula [10]; independent cryptanalytic verification pending. See §6.3 for full security analysis.
 
 3. **Stwo-Kaspa verifier.** Width-24 Poseidon2 compression is a different cryptographic function from Width-16 sponge (different MDS matrix, different round count). A Kaspa-specific verifier is required. Plonky3 [10] already provides a production Width-24 Poseidon2 implementation over M31 with verified parameters: external MDS = circ(2M4, M4, M4, M4, M4, M4) where M4 = [[5,7,1,3],[4,6,1,1],[1,3,5,7],[1,1,4,6]]; internal MDS = 1·1ᵀ + diag(V) with V = [−2, 1, 2, 4, ..., 2²²]; R\_f = 8, R\_p = 22. The remaining requirements are: (a) round constant finalization (Grain LFSR or PRNG; both Stwo and Plonky3 currently use non-production constants), (b) integration with Stwo's proof system, (c) independent security certification. StarkWare's willingness to accept Width-24 as an upstream configuration option determines whether this is a lightweight fork or a permanent maintenance burden.
 
@@ -565,9 +568,9 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 7. **Complementary bottleneck validation.** The claim that PoW (compute-bound) and STARK (memory-bound) can run simultaneously at full throughput requires hardware-level validation on actual ASIC designs.
 
-8. **Triple-ticket independence (resolved).** Under the PRP assumption, for any fixed input x, the permutation output π(x) is uniformly distributed over F\_p^24. A uniform distribution on the product space F\_p^8 × F\_p^8 × F\_p^8 implies that S[0..7], S[8..15], S[16..23] are mutually independent. The joint success probability q = 1 − (1−p)³ = 3p − 3p² + p³ is therefore exact. Any detectable correlation would constitute a PRP distinguisher — equivalent to breaking Poseidon2. See Appendix B.7.
+8. **Triple-ticket independence (resolved under PRP).** Under the PRP assumption, for any fixed input x, the permutation output π(x) is uniformly distributed over F\_p^24. A uniform distribution on the product space F\_p^8 × F\_p^8 × F\_p^8 implies that S[0..7], S[8..15], S[16..23] are mutually independent. The joint success probability q = 1 − (1−p)³ = 3p − 3p² + p³ is therefore exact. Any detectable correlation would constitute a PRP distinguisher — equivalent to breaking Poseidon2. See Appendix B.7.
 
-9. **Trace grinding (resolved).** Under the PRP assumption on Poseidon2, trace selection does not affect the PoW ticket success distribution. The total number of permutations across all STARK commitment phases (initial Merkle tree plus FRI rounds) is determined by protocol parameters and is invariant under trace selection. Each permutation produces three PoW tickets whose joint success probability q = 1−(1−p)³ ≈ 3p, p = T/2^248, is input-independent under PRP. The distribution of valid tickets follows Binomial(P, q) where P is the total permutation count — invariant across trace choices. Multi-trial grinding (k distinct traces, selecting the best outcome) incurs (k−1)/k waste from discarded proofs, yielding net loss for k ≥ 2. Header digest (h\_H) selection is equivalent to nonce grinding under PRP. See Appendix B for the full proof.
+9. **Trace grinding (resolved under PRP).** Under the PRP assumption on Poseidon2, trace selection does not affect the PoW ticket success distribution. The total number of permutations across all STARK commitment phases (initial Merkle tree plus FRI rounds) is determined by protocol parameters and is invariant under trace selection. Each permutation produces three PoW tickets whose joint success probability q = 1−(1−p)³ ≈ 3p, p = T/2^248, is input-independent under PRP. The distribution of valid tickets follows Binomial(P, q) where P is the total permutation count — invariant across trace choices. Multi-trial grinding (k distinct traces, selecting the best outcome) incurs (k−1)/k waste from discarded proofs, yielding net loss for k ≥ 2. Header digest (h\_H) selection is equivalent to nonce grinding under PRP. See Appendix B for the full proof.
 
 ---
 
