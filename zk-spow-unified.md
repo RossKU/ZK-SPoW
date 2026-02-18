@@ -489,23 +489,9 @@ Poseidon2's security against quantum adversaries:
 
 ## 7. Comparison with Prior Work
 
-### 7.1 Key Design Decisions
+### 7.1 STARK Enforcement
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| STARK proof in block? | **No** (Option C) | Eliminates +3–5 MB/s bandwidth at 100 BPS |
-| Hash function | **Poseidon2** | Stwo-Kaspa compatibility |
-| Field | **M31** | Stwo standard (smallest multiplier, highest core density) |
-| Permutation width | **24** (extended from 16) | 1 perm/hash + triple tickets; U = 16/24 ≈ 67%; ZK rate SRAM-bound |
-| Operating mode | **Compression function** | 1 permutation/hash (vs 2 in sponge); recommended by [3] |
-| PoW tickets per hash | **3** | S[0..7], S[8..15], S[16..23]; natural 8-element grouping |
-| PoW hash size | **248 bits** (8 M31 elements) | Close to 256-bit kHeavyHash/Bitcoin class (8-bit reduction) |
-| Header digest elements | **8** (248 bits) | Birthday bound 2^124; matches PoW hash size |
-| STARK enforcement | **None** | Market-driven ZK adoption; avoids bandwidth penalty |
-| Nonce structure | **(v₁, v₂)** each 8 elements | 64 bytes, maps to Merkle child pair in Symbiotic mode |
-| Verifier | **Stwo-Kaspa** | Width-24 Poseidon2 compression; parameter change within [3]'s framework |
-
-**Option C rationale:** Three options were evaluated for STARK enforcement:
+Three options were evaluated for STARK enforcement:
 
 | Option | STARK requirement | Bandwidth impact | ZK-SPoW benefit |
 |--------|------------------|-----------------|-------------------|

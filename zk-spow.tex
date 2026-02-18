@@ -634,33 +634,9 @@ Poseidon2's security against quantum adversaries:
 \section{Comparison with Prior Work}
 \label{sec:comparison}
 
-\subsection{Key Design Decisions}
+\subsection{STARK Enforcement}
 
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{@{}llp{0.40\textwidth}@{}}
-\toprule
-Decision & Choice & Rationale \\
-\midrule
-STARK proof in block? & \textbf{No} (Option~C) & Eliminates +3--5~MB/s at 100~BPS \\
-Hash function & \textbf{Poseidon2} & Stwo-Kaspa compatibility \\
-Field & \textbf{M31} & Stwo standard (smallest multiplier, highest core density) \\
-Permutation width & \textbf{24} (from 16) & 1~perm/hash + triple tickets; $U \approx 67\%$; ZK rate SRAM-bound \\
-Operating mode & \textbf{Compression} & 1~perm/hash (vs 2 in sponge); recommended by~\cite{poseidon2} \\
-PoW tickets/hash & \textbf{3} & $S[0..7]$, $S[8..15]$, $S[16..23]$; natural 8-element grouping \\
-PoW hash size & \textbf{248 bits} & 8~M31 elements; close to 256-bit class ($-$8 bits) \\
-Header digest & \textbf{8} (248 bits) & Birthday bound $2^{124}$; matches PoW hash size \\
-STARK enforcement & \textbf{None} & Market-driven ZK adoption; avoids bandwidth penalty \\
-Nonce structure & $\mathbf{(v_1, v_2)} \times 8$ & 64 bytes; maps to Merkle child pair in Symbiotic mode \\
-Verifier & \textbf{Stwo-Kaspa} & Width-24 Poseidon2 compression; parameter change within~\cite{poseidon2}'s framework \\
-\bottomrule
-\end{tabular}
-\caption{Key design decisions.}
-\label{tab:decisions}
-\end{table}
-
-\textbf{Option~C rationale:} Three options were evaluated for STARK enforcement:
+Three options were evaluated for STARK enforcement:
 
 \begin{table}[h]
 \centering
