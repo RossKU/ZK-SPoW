@@ -222,8 +222,8 @@ Three approaches to integrate header digest into the Merkle hash:
 \toprule
 Design & Width & Mode & Perm/hash & PoW tickets & Core $\Delta$ & Die $\Delta$ \\
 \midrule
-A: 3rd absorb & 16 & Sponge & 3 (+50\%) & 1 & 0\% & 0\% \\
-B: Width 20 & 20 & Compression & 1 & 1 (+4 wasted) & +22\% & ${\sim}$+11\% \\
+A: 3rd absorb & 16 & Sponge & 3 (+50\%) & 1 per 3 perm & 0\% & 0\% \\
+B: Width 20 & 20 & Compression & 1 & 2 (+4 wasted) & +22\% & ${\sim}$+11\% \\
 \textbf{C: Width 24} & \textbf{24} & \textbf{Compression} & \textbf{1} & \textbf{3} & \textbf{+44--105\%} & $\mathbf{{\sim}\text{+22--50\%}}$ \\
 \bottomrule
 \end{tabular}
@@ -231,13 +231,13 @@ B: Width 20 & 20 & Compression & 1 & 1 (+4 wasted) & +22\% & ${\sim}$+11\% \\
 \label{tab:designs}
 \end{table}
 
-\textbf{Design~A:} No Poseidon2 modification. Standard width-16 sponge with 3~absorptions (left, right, header). 3~permutations per Merkle hash; ZK throughput is unaffected under SRAM-bandwidth-bound operation (\S\ref{sec:bottleneck}).
+\textbf{Design~A:} No Poseidon2 modification. Standard width-16 sponge with 3~absorptions (left, right, header). 3~permutations per Merkle hash. PoW output is available only after the final permutation, yielding 1~ticket per 3~permutations---a $6\times$ lower PoW rate per permutation than Design~C. STARK throughput per permutation is $1/3$ that of compression function mode (1~hash per 3~perm vs 1~hash per 1~perm), though under SRAM-bandwidth-bound operation (\S\ref{sec:bottleneck}) the bottleneck is memory, not compute.
 
-\textbf{Design~B:} Extend to width~20 with $\mathit{header\_digest}[4]$. Compression function mode, 1~permutation per hash. But 4~output elements are unused (asymmetric $8{+}8{+}4$ I/O).
+\textbf{Design~B:} Extend to width~20 with $\mathit{header\_digest}[4]$. Compression function mode, 1~permutation per hash, 2~PoW tickets ($S[0..7]$, $S[8..15]$). However, header digest is only 4~M31 elements (124 bits), giving a birthday collision bound of $2^{62}$---well below the 128-bit security target. Asymmetric $8{+}8{+}4$ I/O with 4~wasted output elements.
 
 \textbf{Design~C (selected):} Extend to width~24 with $\mathit{header\_digest}[8]$. Symmetric $8{+}8{+}8$ I/O---all output elements are useful. \textbf{3~PoW tickets per permutation} ($S[0..7]$, $S[8..15]$, and $S[16..23]$; $S[0..7]$ doubles as $\mathit{merkle\_parent}$ in Symbiotic mode). Header digest security doubles (248 vs 124 bits). Width~24 is within the Poseidon2 paper's analyzed parameter range~\cite{poseidon2}. \textbf{ZK throughput is unaffected}: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see \S\ref{sec:bottleneck}). The width extension cost manifests as $U = 16/24 \approx 67\%$ (\S\ref{sec:pouw-paradox}). \textbf{Requires Stwo-Kaspa verifier} supporting Width-24 compression function mode.
 
-\textbf{Design~A vs~C tradeoff.} Under current SRAM bandwidth (${\sim}200$~GB/s; \S\ref{sec:sram}), Design~A's smaller Width-16 cores yield more cores per die and higher total PoW hashrate despite 3~perm/hash. However, Design~A's $3\times$ permutation cost per STARK hash becomes a bottleneck as memory bandwidth increases: at HBM-class bandwidth ($>1$~TB/s), STARK saturates Design~A's Poseidon2 capacity, leaving minimal room for PoW. Design~C's 1~perm/hash scales linearly with bandwidth, maintaining full PoW throughput at any memory tier. Design~C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3~absorptions in Design~A). The tradeoff: Design~A uses well-analyzed Width-16 parameters with no Stwo modification; Design~C requires a Width-24 Stwo-Kaspa verifier (\S\ref{sec:open}) but is future-proof for higher-bandwidth memory architectures.
+\textbf{Design~A vs~C tradeoff.} Design~A requires no Stwo modification and uses well-analyzed Width-16 parameters. However, sponge mode fundamentally limits both PoW and STARK efficiency per permutation: 1~ticket per 3~permutations vs Design~C's 3~tickets per 1~permutation ($9\times$ per-permutation gap). Even after accounting for Design~A's smaller cores (more cores per die), Design~C yields ${\sim}3\times$ higher aggregate PoW hashrate per die. Design~C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3~absorptions). The cost: Design~C requires a Width-24 Stwo-Kaspa verifier (\S\ref{sec:open}) and $+44$--$105\%$ core area overhead.
 
 \subsubsection{Proposed Extension (Design~C)}
 \label{sec:design-c}
