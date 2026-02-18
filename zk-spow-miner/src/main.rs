@@ -53,6 +53,207 @@ fn pow_mod(mut base: u32, mut exp: u32) -> u32 {
 
 fn inv(a: u32) -> u32 { pow_mod(a, P - 2) }
 
+#[inline(always)]
+fn neg(a: u32) -> u32 { if a == 0 { 0 } else { P - a } }
+
+// ── Circle group over M31 ─────────────────────────────────
+// C(M31) = {(x,y) ∈ M31² : x² + y² = 1}, |C(M31)| = p+1 = 2^31
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CirclePoint { x: u32, y: u32 }
+
+impl CirclePoint {
+    const ZERO: Self = CirclePoint { x: 1, y: 0 };
+    const GEN: Self = CirclePoint { x: 2, y: 1268011823 }; // order 2^31
+    const LOG_ORDER: u32 = 31;
+
+    fn cadd(self, rhs: Self) -> Self {
+        CirclePoint {
+            x: sub(mul(self.x, rhs.x), mul(self.y, rhs.y)),
+            y: add(mul(self.x, rhs.y), mul(self.y, rhs.x)),
+        }
+    }
+
+    fn double(self) -> Self {
+        let xx = mul(self.x, self.x);
+        CirclePoint {
+            x: sub(add(xx, xx), 1),
+            y: { let xy = mul(self.x, self.y); add(xy, xy) },
+        }
+    }
+
+    fn conjugate(self) -> Self {
+        CirclePoint { x: self.x, y: neg(self.y) }
+    }
+
+    fn repeated_double(mut self, n: u32) -> Self {
+        for _ in 0..n { self = self.double(); }
+        self
+    }
+
+    /// x-coordinate doubling map: x → 2x² - 1
+    fn double_x(x: u32) -> u32 {
+        let x2 = mul(x, x);
+        sub(add(x2, x2), 1)
+    }
+
+    fn subgroup_gen(log_size: u32) -> Self {
+        Self::GEN.repeated_double(Self::LOG_ORDER - log_size)
+    }
+}
+
+/// Canonic circle domain of size 2^log_size.
+/// Layout: [0..N/2) = half-coset, [N/2..N) = conjugate half-coset.
+/// Pairs (i, i+N/2) are conjugates sharing x-coordinate with negated y.
+struct CDomain {
+    half: Vec<CirclePoint>,
+    log_size: u32,
+}
+
+impl CDomain {
+    fn new(log_size: u32) -> Self {
+        assert!(log_size >= 2);
+        let half_n = 1usize << (log_size - 1);
+        let initial = CirclePoint::subgroup_gen(log_size + 1);
+        let step = CirclePoint::subgroup_gen(log_size - 1);
+        let mut half = Vec::with_capacity(half_n);
+        let mut cur = initial;
+        for _ in 0..half_n {
+            half.push(cur);
+            cur = cur.cadd(step);
+        }
+        CDomain { half, log_size }
+    }
+
+    fn size(&self) -> usize { 1 << self.log_size }
+
+    fn at(&self, i: usize) -> CirclePoint {
+        let h = self.half.len();
+        if i < h { self.half[i] } else { self.half[i - h].conjugate() }
+    }
+}
+
+// ── FRI fold operations ───────────────────────────────────
+
+/// Precompute inverse twiddle factors for all FRI fold levels.
+/// Level 0: inv(y_i) for circle→line fold.
+/// Level k≥1: inv of projected x-coordinates for line→line folds.
+fn fri_twiddles(domain: &CDomain) -> Vec<Vec<u32>> {
+    let half_n = domain.half.len();
+    let mut levels: Vec<Vec<u32>> = Vec::new();
+
+    // Level 0: inverse y-coordinates of half-coset
+    levels.push(domain.half.iter().map(|p| inv(p.y)).collect());
+
+    // Level 1+: projected x-coordinates, halving each time
+    let mut xs: Vec<u32> = domain.half.iter().map(|p| p.x).collect();
+    let mut size = half_n / 2;
+    while size >= 1 {
+        levels.push(xs[..size].iter().map(|&x| inv(x)).collect());
+        for x in xs.iter_mut() { *x = CirclePoint::double_x(*x); }
+        size /= 2;
+    }
+    levels
+}
+
+/// FRI fold: circle evaluations → line evaluations (first step).
+/// Pairs: (i, i+N/2) are conjugates.
+fn fri_fold_circle(evals: &[u32], alpha: u32, inv_y: &[u32]) -> Vec<u32> {
+    let half = evals.len() / 2;
+    (0..half).map(|i| {
+        let (fp, fn_p) = (evals[i], evals[i + half]);
+        let f0 = add(fp, fn_p);
+        let f1 = mul(sub(fp, fn_p), inv_y[i]);
+        add(f0, mul(alpha, f1))
+    }).collect()
+}
+
+/// FRI fold: line evaluations → half-size line evaluations.
+/// Pairs: (i, M-1-i) share negated x-coordinates.
+fn fri_fold_line(evals: &[u32], alpha: u32, inv_x: &[u32]) -> Vec<u32> {
+    let m = evals.len();
+    let half = m / 2;
+    (0..half).map(|i| {
+        let (fx, fn_x) = (evals[i], evals[m - 1 - i]);
+        let f0 = add(fx, fn_x);
+        let f1 = mul(sub(fx, fn_x), inv_x[i]);
+        add(f0, mul(alpha, f1))
+    }).collect()
+}
+
+/// Full FRI fold chain: N evaluations → 1 value.
+fn fri_fold_all(evals: &[u32], alphas: &[u32], twiddles: &[Vec<u32>]) -> Vec<u32> {
+    assert_eq!(alphas.len(), twiddles.len());
+    let mut cur = fri_fold_circle(evals, alphas[0], &twiddles[0]);
+    for k in 1..twiddles.len() {
+        cur = fri_fold_line(&cur, alphas[k], &twiddles[k]);
+    }
+    cur
+}
+
+/// Vanishing polynomial of a canonic coset of size 2^log_n.
+/// Applies double_x (log_n - 1) times; result is 0 on the coset.
+fn vanish_coset(x: u32, log_n: u32) -> u32 {
+    let mut t = x;
+    for _ in 1..log_n { t = CirclePoint::double_x(t); }
+    t
+}
+
+/// Circle STARK smoke test — verify circle group, domain, and FRI.
+fn circle_smoke_test() {
+    let g = CirclePoint::GEN;
+    assert_eq!(add(mul(g.x, g.x), mul(g.y, g.y)), 1, "GEN not on circle");
+    let id = g.repeated_double(CirclePoint::LOG_ORDER);
+    assert_eq!(id, CirclePoint::ZERO, "GEN order != 2^31");
+    let not_id = g.repeated_double(CirclePoint::LOG_ORDER - 1);
+    assert_ne!(not_id, CirclePoint::ZERO, "GEN order < 2^31");
+
+    let log_n: u32 = 4;
+    let n = 1usize << log_n;
+    let dom = CDomain::new(log_n);
+    assert_eq!(dom.size(), n);
+
+    // All domain points on circle
+    for i in 0..n {
+        let p = dom.at(i);
+        assert_eq!(add(mul(p.x, p.x), mul(p.y, p.y)), 1, "pt {} off circle", i);
+    }
+    // Conjugate pairing
+    for i in 0..n / 2 {
+        let (p, q) = (dom.at(i), dom.at(i + n / 2));
+        assert_eq!(p.x, q.x, "conj x mismatch {}", i);
+        assert_eq!(p.y, neg(q.y), "conj y mismatch {}", i);
+    }
+    // All points distinct
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let (a, b) = (dom.at(i), dom.at(j));
+            assert!(a.x != b.x || a.y != b.y, "duplicate pts {} {}", i, j);
+        }
+    }
+
+    // Vanishing polynomial = 0 on domain, != 0 off domain
+    for i in 0..n {
+        assert_eq!(vanish_coset(dom.at(i).x, log_n), 0, "vanish!=0 at {}", i);
+    }
+    let off = CirclePoint::GEN; // not in domain
+    assert_ne!(vanish_coset(off.x, log_n), 0, "vanish==0 off domain");
+
+    // FRI: fold constant function → scaled constant
+    let twiddles = fri_twiddles(&dom);
+    let alphas: Vec<u32> = vec![7, 13, 19, 23];
+    assert_eq!(twiddles.len(), alphas.len());
+    let evals = vec![42u32; n];
+    let result = fri_fold_all(&evals, &alphas, &twiddles);
+    assert_eq!(result.len(), 1);
+    // Constant → f1=0 at every level → result = 2^log_n * c
+    let mut expected = 42u32;
+    for _ in 0..log_n { expected = add(expected, expected); }
+    assert_eq!(result[0], expected, "FRI constant fold: {} != {}", result[0], expected);
+
+    println!("  Circle smoke test PASSED (N={}, {} fold levels, vanish OK)", n, twiddles.len());
+}
+
 // ── Poseidon2 Width-24 ─────────────────────────────────────
 
 const W: usize = 24;
@@ -673,6 +874,7 @@ fn main() {
 
     println!("ZK-SPoW Symbiotic Miner — Poseidon2 Width-24 / M31");
     println!("───────────────────────────────────────────────────");
+    circle_smoke_test();
     println!("Difficulty  : {} bits  (target[0] < {})", difficulty, target[0]);
     println!("Expected    : ~{} perms", fmt((1u64 << difficulty) / 3));
     println!("Threads     : {} total ({} STARK + {} PoW)", n_threads, n_stark, n_pow);
