@@ -335,14 +335,14 @@ struct CStarkProof {
     log_trace: u32,
     trace_root: [u32; 8],
     quotient_root: [u32; 8],
-    // FRI layers (on quotient polynomial)
     fri_roots: Vec<[u32; 8]>,
     fri_last: Vec<u32>,
-    // Query openings
     query_positions: Vec<usize>,
     trace_opens: Vec<LeafOpen>,
     quotient_opens: Vec<LeafOpen>,
-    fri_opens: Vec<Vec<LeafOpen>>, // fri_opens[query][layer]
+    quotient_conj_opens: Vec<LeafOpen>,     // circle fold partner
+    fri_opens: Vec<Vec<LeafOpen>>,          // [query][layer]
+    fri_partner_opens: Vec<Vec<LeafOpen>>,  // [query][layer] fold partner
     fri_alphas_count: usize,
 }
 
@@ -452,11 +452,13 @@ fn cstark_prove(
     }
     let fri_last = current;
 
-    // 6. Query phase
+    // 6. Query phase — open positions + fold partners
     let mut query_positions = Vec::with_capacity(CSTARK_QUERIES);
     let mut trace_opens = Vec::with_capacity(CSTARK_QUERIES);
     let mut quotient_opens = Vec::with_capacity(CSTARK_QUERIES);
+    let mut quotient_conj_opens = Vec::with_capacity(CSTARK_QUERIES);
     let mut fri_opens: Vec<Vec<LeafOpen>> = Vec::with_capacity(CSTARK_QUERIES);
+    let mut fri_partner_opens: Vec<Vec<LeafOpen>> = Vec::with_capacity(CSTARK_QUERIES);
     let t_leaves = t_tree.layers[0].len();
     let q_leaves = q_tree.layers[0].len();
     for _ in 0..CSTARK_QUERIES {
@@ -464,14 +466,25 @@ fn cstark_prove(
         query_positions.push(pos);
         trace_opens.push(t_tree.open((pos / 8).min(t_leaves - 1)));
         quotient_opens.push(q_tree.open((pos / 8).min(q_leaves - 1)));
+        // Conjugate partner for circle fold
+        let conj_pos = if pos < lde_n / 2 { pos + lde_n / 2 } else { pos - lde_n / 2 };
+        quotient_conj_opens.push(q_tree.open((conj_pos / 8).min(q_leaves - 1)));
+        // FRI layer openings + fold partners
         let mut layer_opens = Vec::new();
-        for (li, tree) in fri_trees.iter().enumerate() {
+        let mut partner_opens = Vec::new();
+        let mut cur_pos = pos % (lde_n / 2);
+        let mut cur_size = lde_n / 2;
+        for tree in &fri_trees {
             let sz = tree.layers[0].len();
-            let layer_size = lde_n >> (li + 1);
-            let fp = pos % layer_size;
-            layer_opens.push(tree.open((fp / 8).min(sz - 1)));
+            layer_opens.push(tree.open((cur_pos / 8).min(sz - 1)));
+            let half = cur_size / 2;
+            let p_pos = if cur_pos < half { cur_pos + half } else { cur_pos - half };
+            partner_opens.push(tree.open((p_pos / 8).min(sz - 1)));
+            cur_pos %= half;
+            cur_size = half;
         }
         fri_opens.push(layer_opens);
+        fri_partner_opens.push(partner_opens);
     }
 
     let proof = CStarkProof {
@@ -479,19 +492,20 @@ fn cstark_prove(
         trace_root: t_tree.root(),
         quotient_root: q_tree.root(),
         fri_roots, fri_last,
-        query_positions, trace_opens, quotient_opens, fri_opens,
+        query_positions, trace_opens, quotient_opens, quotient_conj_opens,
+        fri_opens, fri_partner_opens,
         fri_alphas_count: alphas.len(),
     };
     (proof, perms, ticket)
 }
 
-/// Circle STARK verify with constraint quotient + FRI fold consistency.
+/// Circle STARK verify — succinct with fold-partner FRI verification.
 fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     let n = 1usize << proof.log_trace;
     let log_lde = proof.log_trace + LOG_BLOWUP;
     let lde_n = 1usize << log_lde;
 
-    // 1. Recompute constraint quotient from public trace
+    // 1. Recompute trace + constraint polynomial coefficients (succinct: no full LDE)
     let trace = circle_fib_trace(proof.log_trace, proof.a0, proof.a1);
     let trace_dom = CDomain::new(proof.log_trace);
     let inv_tw = fri_twiddles(&trace_dom);
@@ -501,23 +515,14 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
         c_vals[i] = sub(trace[(i + 2) % n], add(trace[(i + 1) % n], trace[i]));
     }
     let c_coeffs = icfft(&c_vals, &inv_tw);
-    let lde_dom = CDomain::new(log_lde);
-    let lde_fwd = cfft_fwd_twiddles(&lde_dom);
     let mut c_padded = vec![0u32; lde_n];
     c_padded[..n].copy_from_slice(&c_coeffs);
-    let c_lde = cfft(&c_padded, &lde_fwd);
     let half_n = n / 2;
     let x_b0 = trace_dom.half[half_n - 2].x;
     let x_b1 = trace_dom.half[half_n - 1].x;
-    let mut q_evals = Vec::with_capacity(lde_n);
-    for j in 0..lde_n {
-        let pt = lde_dom.at(j);
-        let z_val = mul(sub(pt.x, x_b0), sub(pt.x, x_b1));
-        let v_val = vanish_coset(pt.x, proof.log_trace);
-        q_evals.push(mul(mul(c_lde[j], z_val), inv(v_val)));
-    }
+    let lde_dom = CDomain::new(log_lde);
 
-    // 2. Re-derive Fiat-Shamir (must match prover)
+    // 2. Re-derive Fiat-Shamir
     let mut fs = [0u32; W];
     fs[..8].copy_from_slice(&proof.trace_root);
     fs[8..16].copy_from_slice(&proof.quotient_root);
@@ -535,49 +540,79 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     }
     if alphas.len() != proof.fri_alphas_count { return false; }
 
-    // 3. Recompute FRI fold chain on quotient
-    let lde_inv_tw = fri_twiddles(&lde_dom);
-    let mut fri_layers: Vec<Vec<u32>> = Vec::new();
-    let mut cur = fri_fold_circle(&q_evals, alpha0, &lde_inv_tw[0]);
-    fri_layers.push(cur.clone());
-    let mut tw_idx = 1;
-    for ai in 1..alphas.len() {
-        if cur.len() <= FRI_FOLD_STOP { break; }
-        cur = fri_fold_line(&cur, alphas[ai], &lde_inv_tw[tw_idx]);
-        tw_idx += 1;
-        fri_layers.push(cur.clone());
-    }
+    // 3. Precompute FRI twiddles for fold verification
+    let lde_tw = fri_twiddles(&lde_dom);
 
     // 4. Verify queries
     for qi in 0..CSTARK_QUERIES {
         let pos = (rng.next() as usize) % lde_n;
         if proof.query_positions[qi] != pos { return false; }
+        let pt = lde_dom.at(pos);
 
-        // 4a. Trace Merkle opening + polynomial consistency
+        // 4a. Trace Merkle + polynomial consistency
         let to = &proof.trace_opens[qi];
         if !MerkleTree::verify_path(to.leaf, to.idx, &to.path, proof.trace_root, h_h, rc) {
             return false;
         }
-        let pt = lde_dom.at(pos);
-        let expected_t = circle_eval_at(&coeffs, pt);
-        if to.leaf[pos % 8] != expected_t { return false; }
+        if to.leaf[pos % 8] != circle_eval_at(&coeffs, pt) { return false; }
 
-        // 4b. Quotient Merkle opening + constraint quotient consistency
+        // 4b. Quotient Merkle + constraint quotient consistency (succinct)
         let qo = &proof.quotient_opens[qi];
         if !MerkleTree::verify_path(qo.leaf, qo.idx, &qo.path, proof.quotient_root, h_h, rc) {
             return false;
         }
-        if qo.leaf[pos % 8] != q_evals[pos] { return false; }
+        let c_val = circle_eval_at(&c_padded, pt);
+        let z_val = mul(sub(pt.x, x_b0), sub(pt.x, x_b1));
+        let v_val = vanish_coset(pt.x, proof.log_trace);
+        let expected_q = mul(mul(c_val, z_val), inv(v_val));
+        let committed_q = qo.leaf[pos % 8];
+        if committed_q != expected_q { return false; }
 
-        // 4c. FRI fold consistency
-        for (li, fri_root) in proof.fri_roots.iter().enumerate() {
+        // 4c. Quotient conjugate Merkle
+        let qco = &proof.quotient_conj_opens[qi];
+        if !MerkleTree::verify_path(qco.leaf, qco.idx, &qco.path, proof.quotient_root, h_h, rc) {
+            return false;
+        }
+        let conj_pos = if pos < lde_n / 2 { pos + lde_n / 2 } else { pos - lde_n / 2 };
+        let conj_q = qco.leaf[conj_pos % 8];
+
+        // 4d. Circle fold: Q[pos], Q[conj] → expected first FRI layer value
+        let fold_i = pos % (lde_n / 2);
+        let (v0, v1) = if pos < lde_n / 2 { (committed_q, conj_q) } else { (conj_q, committed_q) };
+        let mut expected_val = add(add(v0, v1), mul(alpha0, mul(sub(v0, v1), lde_tw[0][fold_i])));
+
+        // 4e. Walk FRI layers: verify Merkle + fold consistency via partners
+        let mut cur_pos = fold_i;
+        let mut cur_size = lde_n / 2;
+        for li in 0..proof.fri_roots.len() {
             let lo = &proof.fri_opens[qi][li];
-            if !MerkleTree::verify_path(lo.leaf, lo.idx, &lo.path, *fri_root, h_h, rc) {
+            if !MerkleTree::verify_path(lo.leaf, lo.idx, &lo.path, proof.fri_roots[li], h_h, rc) {
                 return false;
             }
-            let layer_size = lde_n >> (li + 1);
-            let fp = pos % layer_size;
-            if lo.leaf[fp % 8] != fri_layers[li][fp] { return false; }
+            if lo.leaf[cur_pos % 8] != expected_val { return false; }
+
+            let po = &proof.fri_partner_opens[qi][li];
+            if !MerkleTree::verify_path(po.leaf, po.idx, &po.path, proof.fri_roots[li], h_h, rc) {
+                return false;
+            }
+            let half = cur_size / 2;
+            let p_pos = if cur_pos < half { cur_pos + half } else { cur_pos - half };
+            let partner_val = po.leaf[p_pos % 8];
+
+            let fold_j = cur_pos % half;
+            let (fv0, fv1) = if cur_pos < half {
+                (lo.leaf[cur_pos % 8], partner_val)
+            } else {
+                (partner_val, lo.leaf[cur_pos % 8])
+            };
+            expected_val = add(add(fv0, fv1), mul(alphas[li + 1], mul(sub(fv0, fv1), lde_tw[li + 1][fold_j])));
+            cur_pos = fold_j;
+            cur_size = half;
+        }
+
+        // 4f. Final value must match fri_last
+        if cur_pos < proof.fri_last.len() {
+            if proof.fri_last[cur_pos] != expected_val { return false; }
         }
     }
 
@@ -649,7 +684,7 @@ fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
                 ticket_state: &[u32; W], ticket_slot: usize) -> Vec<u32> {
     let mut b = Vec::new();
     b.push(0x4353_544B); // magic "CSTK"
-    b.push(2);            // version 2 (with quotient)
+    b.push(3);            // version 3 (fold partners)
     b.push(proof.a0); b.push(proof.a1); b.push(proof.log_trace);
     b.extend_from_slice(&proof.trace_root);
     b.extend_from_slice(&proof.quotient_root);
@@ -663,8 +698,12 @@ fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
         b.push(proof.query_positions[qi] as u32);
         encode_leaf(&mut b, &proof.trace_opens[qi]);
         encode_leaf(&mut b, &proof.quotient_opens[qi]);
+        encode_leaf(&mut b, &proof.quotient_conj_opens[qi]);
         b.push(proof.fri_opens[qi].len() as u32);
-        for lo in &proof.fri_opens[qi] { encode_leaf(&mut b, lo); }
+        for li in 0..proof.fri_opens[qi].len() {
+            encode_leaf(&mut b, &proof.fri_opens[qi][li]);
+            encode_leaf(&mut b, &proof.fri_partner_opens[qi][li]);
+        }
     }
     b.extend_from_slice(h_h);
     b.extend_from_slice(target);
@@ -677,7 +716,7 @@ fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
 fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W], usize)> {
     let mut i = 0;
     if rd(d, &mut i)? != 0x4353_544B { return None; }
-    if rd(d, &mut i)? != 2 { return None; }
+    if rd(d, &mut i)? != 3 { return None; }
     let a0 = rd(d, &mut i)?;
     let a1 = rd(d, &mut i)?;
     let log_trace = rd(d, &mut i)?;
@@ -694,15 +733,23 @@ fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W],
     let mut qp = Vec::with_capacity(nq);
     let mut to = Vec::with_capacity(nq);
     let mut qo = Vec::with_capacity(nq);
+    let mut qco = Vec::with_capacity(nq);
     let mut fo: Vec<Vec<LeafOpen>> = Vec::with_capacity(nq);
+    let mut fpo: Vec<Vec<LeafOpen>> = Vec::with_capacity(nq);
     for _ in 0..nq {
         qp.push(rd(d, &mut i)? as usize);
         to.push(decode_leaf(d, &mut i)?);
         qo.push(decode_leaf(d, &mut i)?);
+        qco.push(decode_leaf(d, &mut i)?);
         let layers = rd(d, &mut i)? as usize;
         let mut ls = Vec::with_capacity(layers);
-        for _ in 0..layers { ls.push(decode_leaf(d, &mut i)?); }
+        let mut ps = Vec::with_capacity(layers);
+        for _ in 0..layers {
+            ls.push(decode_leaf(d, &mut i)?);
+            ps.push(decode_leaf(d, &mut i)?);
+        }
         fo.push(ls);
+        fpo.push(ps);
     }
     let h_h = rd8(d, &mut i)?;
     let target = rd8(d, &mut i)?;
@@ -711,7 +758,9 @@ fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W],
     let mut ts = [0u32; W]; ts.copy_from_slice(&d[i..i+W]);
     Some((CStarkProof {
         a0, a1, log_trace, quotient_root, trace_root, fri_roots, fri_last,
-        query_positions: qp, trace_opens: to, quotient_opens: qo, fri_opens: fo, fri_alphas_count,
+        query_positions: qp, trace_opens: to, quotient_opens: qo,
+        quotient_conj_opens: qco, fri_opens: fo, fri_partner_opens: fpo,
+        fri_alphas_count,
     }, h_h, target, ts, slot))
 }
 
