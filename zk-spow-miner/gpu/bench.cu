@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <cuda_runtime.h>
 
 // ── M31 field: p = 2^31 - 1 ────────────────────────────────
