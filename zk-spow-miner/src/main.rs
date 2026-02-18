@@ -169,12 +169,12 @@ fn fri_fold_circle(evals: &[u32], alpha: u32, inv_y: &[u32]) -> Vec<u32> {
 }
 
 /// FRI fold: line evaluations → half-size line evaluations.
-/// Pairs: (i, M-1-i) share negated x-coordinates.
+/// Pairs: (i, i+M/2) share negated x-coordinates (sequential coset property).
 fn fri_fold_line(evals: &[u32], alpha: u32, inv_x: &[u32]) -> Vec<u32> {
     let m = evals.len();
     let half = m / 2;
     (0..half).map(|i| {
-        let (fx, fn_x) = (evals[i], evals[m - 1 - i]);
+        let (fx, fn_x) = (evals[i], evals[i + half]);
         let f0 = add(fx, fn_x);
         let f1 = mul(sub(fx, fn_x), inv_x[i]);
         add(f0, mul(alpha, f1))
@@ -217,6 +217,7 @@ fn cfft_fwd_twiddles(domain: &CDomain) -> Vec<Vec<u32>> {
 }
 
 /// iCFFT helper: line levels (recursive).
+/// Pairs: (i, i+M/2) share negated x-coordinates.
 fn icfft_line(evals: &[u32], inv_twid: &[Vec<u32>]) -> Vec<u32> {
     let m = evals.len();
     if m == 1 { return evals.to_vec(); }
@@ -224,7 +225,7 @@ fn icfft_line(evals: &[u32], inv_twid: &[Vec<u32>]) -> Vec<u32> {
     let mut even = Vec::with_capacity(half);
     let mut odd = Vec::with_capacity(half);
     for i in 0..half {
-        let (a, b) = (evals[i], evals[m - 1 - i]);
+        let (a, b) = (evals[i], evals[i + half]);
         even.push(add(a, b));
         odd.push(mul(sub(a, b), inv_twid[0][i]));
     }
@@ -260,6 +261,7 @@ fn icfft(evals: &[u32], inv_twid: &[Vec<u32>]) -> Vec<u32> {
 }
 
 /// CFFT helper: line levels (recursive).
+/// Output: (i, i+M/2) pairs with negated x-coordinates.
 fn cfft_line(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
     let m = coeffs.len();
     if m == 1 { return coeffs.to_vec(); }
@@ -273,7 +275,7 @@ fn cfft_line(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
     for i in 0..half {
         let t = mul(fwd_twid[0][i], oe[i]);
         r[i] = add(ee[i], t);
-        r[m - 1 - i] = sub(ee[i], t);
+        r[i + half] = sub(ee[i], t);
     }
     r
 }
@@ -295,6 +297,30 @@ fn cfft(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
         r[i + half] = sub(ee[i], t);
     }
     r
+}
+
+/// Evaluate line polynomial at a single x-value (direct, O(n)).
+/// Basis: [1, x, 2x²-1, (2x²-1)x, ...] interleaved even/odd.
+fn line_eval_at(coeffs: &[u32], x: u32) -> u32 {
+    if coeffs.len() == 1 { return coeffs[0]; }
+    let half = coeffs.len() / 2;
+    let mut ec = Vec::with_capacity(half);
+    let mut oc = Vec::with_capacity(half);
+    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
+    let nx = CirclePoint::double_x(x);
+    add(line_eval_at(&ec, nx), mul(x, line_eval_at(&oc, nx)))
+}
+
+/// Evaluate circle polynomial at a single point (direct, O(n)).
+/// Basis: [1, y, x, xy, 2x²-1, (2x²-1)y, ...] interleaved.
+fn circle_eval_at(coeffs: &[u32], p: CirclePoint) -> u32 {
+    let n = coeffs.len();
+    if n == 1 { return coeffs[0]; }
+    let half = n / 2;
+    let mut ec = Vec::with_capacity(half);
+    let mut oc = Vec::with_capacity(half);
+    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
+    add(line_eval_at(&ec, p.x), mul(p.y, line_eval_at(&oc, p.x)))
 }
 
 // ── Circle STARK prover & verifier ────────────────────────
@@ -564,11 +590,25 @@ fn circle_smoke_test() {
     let lde_fwd = cfft_fwd_twiddles(&lde_dom);
     let mut padded = vec![0u32; lde_n];
     padded[..n].copy_from_slice(&coeffs);
-    let _lde_evals = cfft(&padded, &lde_fwd);
+    let lde_evals = cfft(&padded, &lde_fwd);
     // Verify: vanish_coset(trace domain) != 0 on all LDE points
     for i in 0..lde_n {
         let v = vanish_coset(lde_dom.at(i).x, log_n);
         assert_ne!(v, 0, "LDE pt {} in trace vanish set", i);
+    }
+
+    // circle_eval_at vs CFFT on trace domain
+    for i in 0..n {
+        let pt = dom.at(i);
+        let eval = circle_eval_at(&coeffs, pt);
+        assert_eq!(eval, test_evals[i], "circle_eval_at trace mismatch at {}", i);
+    }
+
+    // circle_eval_at vs CFFT on LDE domain
+    for i in 0..lde_n {
+        let pt = lde_dom.at(i);
+        let eval = circle_eval_at(&padded, pt);
+        assert_eq!(eval, lde_evals[i], "circle_eval_at LDE mismatch at {}", i);
     }
 
     // Circle STARK prove & verify
