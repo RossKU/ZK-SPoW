@@ -717,6 +717,8 @@ Ofelimos~\cite{ofelimos} is the closest prior work, using SNARK proofs as useful
 
 \subsection{ZK-Symbiotic ASIC Block Diagram}
 
+\textbf{Note:} All parameters in this appendix (process node, power, die allocation, SRAM capacity/bandwidth, gate counts) are reference estimates for a hypothetical design. No chip has been fabricated.
+
 \begin{Verbatim}[fontsize=\scriptsize]
 +-- ZK-SPoW ASIC (7nm, ~200W) -----------------------------------------+
 |                                                                        |
@@ -811,15 +813,19 @@ s3' = s0 + s1 + 4*s2 + 6*s3
 
 Coefficients in {1,3,4,5,6,7} -- all shift+add, no multipliers
 \end{Verbatim}
-Width~24 = 6 groups of 4 $\to$ 6 M4 applications $\to$ \textbf{shift+add only} in external MDS.
+Width~24 = 6 groups of 4. The full external MDS is $\mathrm{circ}(2M_4, M_4, \ldots, M_4)$: compute the element-wise global sum $S = \sum_j g_j$, then apply $M_4(g_i + S)$ for each group $i$---6~$M_4$ evaluations plus one reduction. All arithmetic is \textbf{shift+add only}.
 
 \textbf{Internal rounds} use sparse MDS: $M_I = \mathbf{1}\mathbf{1}^\top + \mathrm{diag}(V)$, where $V = [-2, 1, 2, 4, \ldots, 2^{22}]$ (Plonky3 production values~\cite{plonky3}):
 \begin{Verbatim}[fontsize=\small]
 sum = s0 + s1 + ... + s_{t-1}         // t-1 additions
 s_i' = V[i] * s_i + sum               // V[i] in {powers of 2, -2} -> shift+add
 
-Width 16 (standard): 16 multiplications per internal round
-Width 24 (extended): 24 multiplications per internal round  (+50%)
+Width 16 (standard): 16 shift-add operations per internal round
+Width 24 (extended): 24 shift-add operations per internal round  (+50%)
+
+Note: V[i] are powers of 2 (or -2), so each operation is a bit
+shift (zero gates) plus one addition (~200 gates). Gate counts in
+Table 5 conservatively use full-multiplier cost (~1K/element).
 \end{Verbatim}
 
 \subsubsection{Full Round vs Partial Round}
@@ -832,8 +838,8 @@ Component & External round ($\times 8$) & Internal round ($\times 22$) \\
 \midrule
 S-box & $24 \times 3$K $= 72$K gates & $1 \times 3$K $= 3$K gates \\
 MDS & M4 blocks (${\sim}12$K gates) & diag $+ \mathbf{1}\mathbf{1}^\top$ (${\sim}24$K gates) \\
-Round constants & $24 \times 100 = 2.4$K & $2.4$K \\
-\textbf{Subtotal} & $\mathbf{{\sim}86}$\textbf{K gates} & $\mathbf{{\sim}29}$\textbf{K gates} \\
+Round constants & $24 \times 100 = 2.4$K & $1 \times 100 = 0.1$K \\
+\textbf{Subtotal} & $\mathbf{{\sim}86}$\textbf{K gates} & $\mathbf{{\sim}27}$\textbf{K gates} \\
 \bottomrule
 \end{tabular}
 \caption{Per-round gate counts.}
@@ -842,9 +848,9 @@ Round constants & $24 \times 100 = 2.4$K & $2.4$K \\
 
 \textbf{Total core (pipelined):}
 \[
-8 \times 86\text{K} + 22 \times 29\text{K} = 688\text{K} + 638\text{K} \approx 1{,}326\text{K gates (Width 24)}
+8 \times 86\text{K} + 22 \times 27\text{K} = 688\text{K} + 594\text{K} \approx 1{,}282\text{K gates (Width 24)}
 \]
-Standard Width~16: $8 \times 58\text{K} + 14 \times 21\text{K} = 464\text{K} + 294\text{K} \approx 758\text{K gates}$. Overhead: $+75\%$ core logic.
+Standard Width~16: $8 \times 58\text{K} + 14 \times 19\text{K} = 464\text{K} + 266\text{K} \approx 730\text{K gates}$. Overhead: $+76\%$ core logic.
 
 \subsection{Pipeline Design Options}
 
@@ -954,7 +960,7 @@ Metric & Value & Note \\
 Hardware STARK fraction ($f$) & ${\sim}10\%$ & SRAM-bandwidth limited \\
 Hardware PoW fraction & ${\sim}90\%$ & Fills idle Poseidon2 cycles \\
 $U$ (usefulness) & $\approx 67\%$ & $t_0/t = 16/24$; width extension overhead = 33\% \\
-STARK proofs/sec & ${\sim}260$ & $2.08\text{G}/8\text{M hashes per proof}$ \\
+STARK proofs/sec & ${\sim}260$ & $2.08\text{G}/8\text{M hashes per proof (parameter-dependent)}$ \\
 PoW hashrate & ${\sim}63$G effective & $21\text{G perm/sec} \times 3$ tickets \\
 $U_{\mathrm{avg}}$ & $\approx 6.7\%$ & $f \times U = 0.10 \times 0.67$ \\
 \bottomrule
@@ -983,12 +989,14 @@ Memory technology & Bandwidth & $f$ & $U_{\mathrm{avg}}$ ($f \times 67\%$) & Pro
 SRAM 32\,MB & 200\,GB/s & ${\sim}10\%$ & ${\sim}6.7\%$ & ${\sim}260$ \\
 SRAM 64\,MB & 400\,GB/s & ${\sim}20\%$ & ${\sim}13\%$ & ${\sim}520$ \\
 HBM3 8\,GB & 1.2\,TB/s & ${\sim}60\%$ & ${\sim}40\%$ & ${\sim}1{,}560$ \\
-HBM3E 16\,GB & 2.4\,TB/s & ${\sim}100\%$ & ${\sim}67\%$ & ${\sim}3{,}120$ \\
+HBM3E 16\,GB & 2.4\,TB/s & ${\sim}100\%^{\dagger}$ & ${\sim}67\%$ & ${\sim}2{,}625^{\dagger}$ \\
 \bottomrule
 \end{tabular}
 \caption{$U_{\mathrm{avg}}$ scaling with memory bandwidth.}
 \label{tab:memory-scaling}
 \end{table}
+
+$\dagger$~At 2.4\,TB/s, SRAM delivers ${\sim}25$G hash/sec, exceeding the 21G perm/sec compute capacity. The STARK fraction saturates at 100\% and proofs/sec is compute-capped at $21\text{G}/8\text{M} \approx 2{,}625$.
 
 With HBM, the STARK fraction approaches 100\%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof \emph{economic throughput} but does not change $U$ (which is bounded by $t_0/t = 16/24 \approx 67\%$, the width extension overhead). Higher memory bandwidth cannot overcome the fundamental width ratio cost.
 
@@ -1057,7 +1065,7 @@ Metric & Goldilocks ($2^{64}-2^{32}+1$) & M31 ($2^{31}-1$) \\
 Element size & 64 bits & 31 bits \\
 Multiplier gates & ${\sim}3{,}500$ & ${\sim}1{,}000$ \\
 Multiplier latency & 2--3 cycles & 1 cycle \\
-Poseidon2 width (ext.) & 13 (rate 9, cap 4) & 24 (compression) \\
+Poseidon2 width (ext.) & 12 (compression: $4{+}4{+}4$) & 24 (compression: $8{+}8{+}8$) \\
 Hash output & $4 \times 64 = 256$ bits & $8 \times 31 = 248$ bits \\
 Cores per die (30M gates) & ${\sim}23$ & ${\sim}21$ \\
 STARK ecosystem & Plonky2/Plonky3 & \textbf{Stwo (potential Kaspa choice)} \\
@@ -1079,7 +1087,7 @@ We prove that trace selection in Symbiotic mode provides zero advantage for PoW 
 
 \begin{enumerate}
 \item \textbf{PRP.} The Poseidon2 permutation $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ is a pseudorandom permutation. For any input $x$, the output $\pi(x)$ is indistinguishable from uniform over $\mathbb{F}_p^{24}$.
-\item \textbf{Fixed tree sizes.} Each Merkle commitment phase $i$ ($i = 0$ for the initial trace commitment, $i = 1, \ldots, m$ for FRI rounds) has $2N_i - 1$ internal nodes, where $N_i$ is determined by the protocol (trace length, blowup factor, FRI folding rate). The values $N_i$ are independent of trace content.
+\item \textbf{Fixed tree sizes.} Each Merkle commitment phase $i$ ($i = 0$ for the initial trace commitment, $i = 1, \ldots, m$ for FRI rounds) has $N_i$ leaves, yielding $N_i - 1$ internal hash evaluations, where $N_i$ is determined by the protocol (trace length, blowup factor, FRI folding rate). The values $N_i$ are independent of trace content.
 \item \textbf{Fixed header digest.} The header digest $h_H \in \mathbb{F}_p^8$ is fixed at the start of each Merkle commitment phase and constant throughout that phase.
 \end{enumerate}
 
@@ -1087,7 +1095,7 @@ We prove that trace selection in Symbiotic mode provides zero advantage for PoW 
 
 Each Poseidon2 permutation in the Merkle tree produces three PoW tickets. The total number of permutations across all STARK phases is:
 \[
-  P = \sum_{i=0}^{m} (2N_i - 1)
+  P = \sum_{i=0}^{m} (N_i - 1)
 \]
 Since each $N_i$ is a protocol parameter independent of the trace $t$:
 \[

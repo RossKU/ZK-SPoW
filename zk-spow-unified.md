@@ -548,6 +548,8 @@ Ofelimos [7] is the closest prior work, using SNARK proofs as useful work within
 
 ## A.1 ZK-Symbiotic ASIC Block Diagram
 
+**Note:** All parameters in this appendix (process node, power, die allocation, SRAM capacity/bandwidth, gate counts) are reference estimates for a hypothetical design. No chip has been fabricated.
+
 ```
 ┌─ ZK-SPoW ASIC (7nm, ~200W) ──────────────────────────────────────────┐
 │                                                                        │
@@ -655,7 +657,7 @@ For each 4-element group:
   Coefficients ∈ {1,3,4,5,6,7} — all shift+add, no multipliers
 ```
 
-Width 24 = 6 groups of 4 → 6 M4 applications → **shift+add only** in external MDS.
+Width 24 = 6 groups of 4. The full external MDS is circ(2M4, M4, ..., M4): compute the element-wise global sum S = Σ gⱼ, then apply M4(gᵢ + S) for each group i — 6 M4 evaluations plus one reduction. All arithmetic is **shift+add only**.
 
 **Internal rounds** use sparse MDS: M\_I = **1**·**1**^T + diag(V), where V = [−2, 1, 2, 4, ..., 2²²] (Plonky3 production values [10]):
 
@@ -663,8 +665,12 @@ Width 24 = 6 groups of 4 → 6 M4 applications → **shift+add only** in externa
 sum = s₀ + s₁ + ... + s_{t-1}        // t-1 additions
 s_i' = V[i] · s_i + sum               // V[i] ∈ {powers of 2, −2} → shift+add
 
-Width 16 (standard): 16 multiplications per internal round
-Width 24 (extended): 24 multiplications per internal round  (+50%)
+Width 16 (standard): 16 shift-add operations per internal round
+Width 24 (extended): 24 shift-add operations per internal round  (+50%)
+
+Note: V[i] are powers of 2 (or -2), so each operation is a bit
+shift (zero gates) plus one addition (~200 gates). Gate counts in
+the table below conservatively use full-multiplier cost (~1K/element).
 ```
 
 ### A.2.4 Full Round vs Partial Round
@@ -673,18 +679,18 @@ Width 24 (extended): 24 multiplications per internal round  (+50%)
 |-----------|--------------------|--------------------|
 | S-box | t S-boxes (24 × 3K = 72K gates) | 1 S-box (3K gates) |
 | MDS | M4 blocks (shift+add, ~12K gates) | diag + 1·1^T (24 × 1K = 24K gates) |
-| Round constants | t additions (24 × ~100 = 2.4K) | t additions (2.4K) |
-| **Subtotal** | **~86K gates** | **~29K gates** |
+| Round constants | t additions (24 × ~100 = 2.4K) | 1 addition (~0.1K) |
+| **Subtotal** | **~86K gates** | **~27K gates** |
 
 **Total core (pipelined):**
 
 ```
-8 × 86K + 22 × 29K = 688K + 638K = ~1,326K gates per core (Width 24)
+8 × 86K + 22 × 27K = 688K + 594K = ~1,282K gates per core (Width 24)
 
 Standard Width 16:
-8 × 58K + 14 × 21K = 464K + 294K = ~758K gates per core
+8 × 58K + 14 × 19K = 464K + 266K = ~730K gates per core
 
-Overhead: +75% core logic (Width 16 → 24)
+Overhead: +76% core logic (Width 16 → 24)
 ```
 
 ---
@@ -799,7 +805,7 @@ PoW allocation:    remaining ≈ 90.1%
 | Hardware STARK fraction (f) | ~10% | SRAM-bandwidth limited |
 | Hardware PoW fraction | ~90% | Fills idle Poseidon2 cycles |
 | U (usefulness) | **≈67%** | t₀/t = 16/24; width extension overhead = 33% (see §1.2) |
-| STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
+| STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof (parameter-dependent) |
 | PoW hashrate | ~63G effective | 21G perm/sec × 3 tickets |
 | U\_avg | **≈6.7%** | f × U = 0.10 × 0.67; time-averaged usefulness (see §1.2) |
 
@@ -818,7 +824,9 @@ PoW allocation:    remaining ≈ 90.1%
 | SRAM 32 MB | 200 GB/s | ~10% | ~6.7% | ~260 |
 | SRAM 64 MB | 400 GB/s | ~20% | ~13% | ~520 |
 | HBM3 8 GB | 1.2 TB/s | ~60% | ~40% | ~1,560 |
-| HBM3E 16 GB | 2.4 TB/s | ~100% | ~67% | ~3,120 |
+| HBM3E 16 GB | 2.4 TB/s | ~100%† | ~67% | ~2,625† |
+
+†At 2.4 TB/s, SRAM delivers ~25G hash/sec, exceeding the 21G perm/sec compute capacity. The STARK fraction saturates at 100% and proofs/sec is compute-capped at 21G/8M ≈ 2,625.
 
 With HBM, the STARK fraction approaches 100%, and nearly all Poseidon2 cycles serve STARK computation simultaneously with PoW. Note: this increases ZK proof *economic throughput* but does not change U (which is bounded by t₀/t = 16/24 ≈ 67%, the width extension overhead). Higher memory bandwidth cannot overcome the fundamental width ratio cost.
 
@@ -881,7 +889,7 @@ Poseidon2 has ~6× lower PoW hashrate per die than kHeavyHash. **This is absorbe
 | Element size | 64 bits | 31 bits |
 | Multiplier gates | ~3,500 | ~1,000 |
 | Multiplier latency | 2–3 cycles | 1 cycle |
-| Poseidon2 width (extended) | 13 (rate 9, cap 4) | 24 (compression function) |
+| Poseidon2 width (extended) | 12 (compression: 4+4+4) | 24 (compression: 8+8+8) |
 | Hash output | 4 × 64 = 256 bits | 8 × 31 = 248 bits |
 | Cores per die (30M gates) | ~23 | ~21 |
 | STARK ecosystem | Plonky2/Plonky3 | **Stwo (potential Kaspa choice)** |
@@ -897,7 +905,7 @@ We prove that trace selection in Symbiotic mode provides zero advantage for PoW 
 ### B.1 Assumptions
 
 1. **PRP.** The Poseidon2 permutation π: F\_p^24 → F\_p^24 is a pseudorandom permutation. For any input x, the output π(x) is indistinguishable from uniform over F\_p^24.
-2. **Fixed tree sizes.** Each Merkle commitment phase i (i = 0 for the initial trace commitment, i = 1, ..., m for FRI rounds) has 2Nᵢ − 1 internal nodes, where Nᵢ is determined by the protocol (trace length, blowup factor, FRI folding rate). The values Nᵢ are independent of trace content.
+2. **Fixed tree sizes.** Each Merkle commitment phase i (i = 0 for the initial trace commitment, i = 1, ..., m for FRI rounds) has Nᵢ leaves, yielding Nᵢ − 1 internal hash evaluations, where Nᵢ is determined by the protocol (trace length, blowup factor, FRI folding rate). The values Nᵢ are independent of trace content.
 3. **Fixed header digest.** The header digest h\_H ∈ F\_p^8 is fixed at the start of each Merkle commitment phase and constant throughout that phase.
 
 ### B.2 Ticket Count Invariance
@@ -905,7 +913,7 @@ We prove that trace selection in Symbiotic mode provides zero advantage for PoW 
 Each Poseidon2 permutation in the Merkle tree produces three PoW tickets. The total number of permutations across all STARK phases is:
 
 ```
-P = Σᵢ (2Nᵢ − 1)
+P = Σᵢ (Nᵢ − 1)
 ```
 
 Since each Nᵢ is a protocol parameter independent of the trace t:
