@@ -1120,27 +1120,46 @@ fn print_result(
 
 fn stark_worker(
     tid: usize, h_h: [u32; 8], target: [u32; 8],
-    trace_len: usize, stats: Arc<Stats>, start: Instant,
+    log_trace: u32, stats: Arc<Stats>, start: Instant,
 ) {
     let rc = gen_rc();
-    let dom = trace_len * BLOWUP;
-    let weights = barycentric_weights(trace_len);
-    let inv_tab = precompute_inv_table(dom);
     let mut proof_id: u32 = tid as u32;
 
     while !stats.found.load(Ordering::Relaxed) {
-        let trace = fib_trace(trace_len, proof_id, 1);
-        let (proof, perms, ticket) = stark_prove(&trace, &h_h, &rc, &target, &weights, &inv_tab);
+        let trace = circle_fib_trace(log_trace, proof_id, 1);
+        let (proof, perms, ticket) = cstark_prove(&trace, log_trace, &h_h, &rc, &target);
         stats.stark_perms.fetch_add(perms, Ordering::Relaxed);
 
-        let valid = stark_verify(&proof, &h_h, &rc);
-        if !valid { eprintln!("BUG: proof #{} failed verification!", proof_id); }
+        let valid = cstark_verify(&proof, &h_h, &rc);
+        if !valid { eprintln!("BUG: Circle STARK proof #{} failed!", proof_id); }
         stats.stark_proofs.fetch_add(1, Ordering::Relaxed);
 
         if let Some((state, slot)) = ticket {
             if stats.found.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed).is_ok() {
-                let info = format!("Fib(a0={}, len={}) LDE={}x Q_deg<2 verified={}", proof_id, trace_len, BLOWUP, valid);
+                let info = format!("CircleSTARK Fib(a0={}, len=2^{}) LDE=4x FRI verified={}", proof_id, log_trace, valid);
                 print_result("STARK", tid, slot, &state, None, Some(&info), &stats, start);
+                // Print ZK proof certificate
+                print!("\n=== ZK-SPoW PROOF CERTIFICATE ===\n");
+                println!("AIR         : Fibonacci(a0={}, a1=1, len=2^{})", proof_id, log_trace);
+                println!("Field       : M31 (p=2^31-1)");
+                println!("Domain      : Circle C(M31), |C|=2^31");
+                print!("Trace root  : ");
+                for v in &proof.trace_root { print!("{:08x}", v); }
+                println!();
+                println!("FRI layers  : {}", proof.fri_roots.len());
+                for (k, r) in proof.fri_roots.iter().enumerate() {
+                    print!("  FRI[{}]    : ", k);
+                    for v in r { print!("{:08x}", v); }
+                    println!();
+                }
+                println!("FRI last    : {} values (degree-0)", proof.fri_last.len());
+                println!("Queries     : {}", CSTARK_QUERIES);
+                println!("Blowup      : {}x", 1u32 << LOG_BLOWUP);
+                println!("Verified    : {}", valid);
+                print!("Ticket      : ");
+                for j in 0..8 { if j > 0 { print!(","); } print!("{:08x}", state[slot * 8 + j]); }
+                println!();
+                println!("=== END CERTIFICATE ===");
             }
             return;
         }
@@ -1218,9 +1237,11 @@ fn main() {
     let difficulty: u32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let n_threads: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or_else(num_cpus);
     let n_stark: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.min(n_threads));
-    let trace_len: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(256);
+    let log_trace: u32 = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(8);
+    let trace_len = 1usize << log_trace;
     let n_pow = n_threads - n_stark;
-    let n_leaves = next_pow2(trace_len * BLOWUP / 8);
+    let lde_size = trace_len * (1 << LOG_BLOWUP);
+    let n_leaves = next_pow2(lde_size / 8);
 
     let target = make_target(difficulty);
     let rc = gen_rc();
@@ -1236,12 +1257,10 @@ fn main() {
     println!("Difficulty  : {} bits  (target[0] < {})", difficulty, target[0]);
     println!("Expected    : ~{} perms", fmt((1u64 << difficulty) / 3));
     println!("Threads     : {} total ({} STARK + {} PoW)", n_threads, n_stark, n_pow);
-    println!("STARK AIR   : Fibonacci over M31 (trace_len={})", trace_len);
-    println!("Polynomial  : degree<{}, LDE {}x on {} points", trace_len, BLOWUP, trace_len * BLOWUP);
-    println!("Commitment  : 2 Poseidon2 Merkle trees ({} leaves each)", n_leaves);
-    println!("Queries     : {} per proof, quotient degree<2 linearity test", N_QUERIES);
-    println!("Params      : W={}, Rf={}, Rp={}", W, RF, RP);
-    println!("I/O layout  : [v1/left(8) | v2/right(8) | h_H(8)] — compression, no capacity");
+    println!("STARK        : Circle STARK over C(M31), Fib trace 2^{} = {}", log_trace, trace_len);
+    println!("LDE          : {}x blowup → {} points, Merkle {} leaves", 1u32 << LOG_BLOWUP, lde_size, n_leaves);
+    println!("FRI          : {} queries, fold to ≤{} values", CSTARK_QUERIES, FRI_FOLD_STOP);
+    println!("Poseidon2    : W={}, Rf={}, Rp={}", W, RF, RP);
     println!("───────────────────────────────────────────────────");
 
     let stats = Arc::new(Stats {
@@ -1258,7 +1277,7 @@ fn main() {
         let hh = h_h;
         let tgt = target;
         handles.push(std::thread::spawn(move || {
-            stark_worker(tid, hh, tgt, trace_len, stats, start);
+            stark_worker(tid, hh, tgt, log_trace, stats, start);
         }));
     }
     for i in 0..n_pow {
