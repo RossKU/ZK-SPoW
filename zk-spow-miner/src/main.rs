@@ -515,8 +515,6 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
         c_vals[i] = sub(trace[(i + 2) % n], add(trace[(i + 1) % n], trace[i]));
     }
     let c_coeffs = icfft(&c_vals, &inv_tw);
-    let mut c_padded = vec![0u32; lde_n];
-    c_padded[..n].copy_from_slice(&c_coeffs);
     let half_n = n / 2;
     let x_b0 = trace_dom.half[half_n - 2].x;
     let x_b1 = trace_dom.half[half_n - 1].x;
@@ -561,7 +559,7 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
         if !MerkleTree::verify_path(qo.leaf, qo.idx, &qo.path, proof.quotient_root, h_h, rc) {
             return false;
         }
-        let c_val = circle_eval_at(&c_padded, pt);
+        let c_val = circle_eval_at(&c_coeffs, pt);
         let z_val = mul(sub(pt.x, x_b0), sub(pt.x, x_b1));
         let v_val = vanish_coset(pt.x, proof.log_trace);
         let expected_q = mul(mul(c_val, z_val), inv(v_val));
@@ -1079,271 +1077,6 @@ impl MerkleTree {
     }
 }
 
-// ── Legacy polynomial STARK (kept for reference) ────────────
-
-#[allow(dead_code)]
-fn precompute_inv_table(max: usize) -> Vec<u32> {
-    let mut tab = vec![0u32; max + 1];
-    if max >= 1 { tab[1] = 1; }
-    for i in 2..=max {
-        // inv(i) = -(P/i) * inv(P mod i)
-        tab[i] = mul(P - (P / (i as u32)), tab[(P % (i as u32)) as usize]);
-    }
-    tab
-}
-
-#[allow(dead_code)]
-fn barycentric_weights(n: usize) -> Vec<u32> {
-    let mut fact = vec![1u32; n];
-    for i in 1..n { fact[i] = mul(fact[i - 1], i as u32); }
-    let mut inv_fact = vec![1u32; n];
-    inv_fact[n - 1] = inv(fact[n - 1]);
-    for i in (0..n - 1).rev() { inv_fact[i] = mul(inv_fact[i + 1], (i + 1) as u32); }
-    let mut w = vec![0u32; n];
-    for i in 0..n {
-        let sign = if (n - 1 - i) % 2 == 0 { 1 } else { P - 1 };
-        w[i] = mul(sign, mul(inv_fact[i], inv_fact[n - 1 - i]));
-    }
-    w
-}
-
-/// Evaluate trace polynomial on LDE domain via barycentric Lagrange.
-#[allow(dead_code)]
-fn compute_lde(trace: &[u32], weights: &[u32], inv_tab: &[u32], dom: usize) -> Vec<u32> {
-    let n = trace.len();
-    let mut evals = Vec::with_capacity(dom);
-    for &v in trace { evals.push(v); }
-
-    // Precompute w_i * f_i
-    let mut wf = vec![0u32; n];
-    for i in 0..n { wf[i] = mul(weights[i], trace[i]); }
-
-    // ℓ(n) = n! (falling factorial base)
-    let mut ell = 1u32;
-    for i in 1..=n { ell = mul(ell, i as u32); }
-
-    for x in n..dom {
-        let mut sum = 0u32;
-        for i in 0..n { sum = add(sum, mul(wf[i], inv_tab[x - i])); }
-        evals.push(mul(ell, sum));
-        // ℓ(x+1) = ℓ(x) * (x+1) / (x+1-n)
-        if x + 1 < dom {
-            ell = mul(mul(ell, (x + 1) as u32), inv_tab[x + 1 - n]);
-        }
-    }
-    evals
-}
-
-/// Compute constraint quotient Q(x) = (T(x+2)-T(x+1)-T(x)) / Z(x).
-#[allow(dead_code)]
-fn compute_quotient(t_evals: &[u32], n: usize, inv_tab: &[u32]) -> Vec<u32> {
-    let dom = t_evals.len();
-    let mut q_evals = vec![0u32; dom];
-    let start = n - 2;
-    let count = dom - n; // number of Q evaluations
-
-    // Incremental Z(x) = ∏_{i=0}^{n-3}(x-i)
-    // Z(start) = Z(n-2) = (n-2)!
-    let mut z = 1u32;
-    for i in 1..=(n as u32 - 2) { z = mul(z, i); }
-    let mut z_vals = Vec::with_capacity(count);
-    z_vals.push(z);
-    for x in start..(start + count - 1) {
-        // Z(x+1) = Z(x) * (x+1) / (x-n+3)
-        z = mul(mul(z, (x + 1) as u32), inv_tab[x + 3 - n]);
-        z_vals.push(z);
-    }
-
-    // Batch invert all Z values (Montgomery's trick)
-    let mut prefix = vec![0u32; count];
-    prefix[0] = z_vals[0];
-    for i in 1..count { prefix[i] = mul(prefix[i - 1], z_vals[i]); }
-    let mut inv_p = inv(prefix[count - 1]);
-    let mut z_invs = vec![0u32; count];
-    for i in (1..count).rev() {
-        z_invs[i] = mul(inv_p, prefix[i - 1]);
-        inv_p = mul(inv_p, z_vals[i]);
-    }
-    z_invs[0] = inv_p;
-
-    for (k, x) in (start..start + count).enumerate() {
-        let c = sub(t_evals[x + 2], add(t_evals[x + 1], t_evals[x]));
-        q_evals[x] = mul(c, z_invs[k]);
-    }
-    q_evals
-}
-
-/// Evaluate vanishing polynomial Z(x) = ∏_{i=0}^{n-3}(x-i) at a single point.
-#[allow(dead_code)]
-fn vanishing_eval(x: u32, n: usize) -> u32 {
-    let mut z = 1u32;
-    for i in 0..(n as u32 - 2) { z = mul(z, sub(x, i)); }
-    z
-}
-
-// ── STARK structures ────────────────────────────────────────
-
-#[allow(dead_code)]
-const BLOWUP: usize = 4;
-#[allow(dead_code)]
-const N_QUERIES: usize = 32;
-
-#[allow(dead_code)]
-struct StarkQuery {
-    x: usize,
-    t_lo: LeafOpen,  // trace leaf at x/8
-    t_hi: LeafOpen,  // trace leaf at (x+2)/8
-    q: LeafOpen,     // quotient leaf at x/8
-}
-
-#[allow(dead_code)]
-struct StarkProof {
-    a0: u32,
-    a1: u32,
-    trace_len: usize,
-    trace_root: [u32; 8],
-    quotient_root: [u32; 8],
-    boundary: LeafOpen,
-    queries: Vec<StarkQuery>,
-}
-
-// ── STARK prover ────────────────────────────────────────────
-
-#[allow(dead_code)]
-fn fib_trace(n: usize, a0: u32, a1: u32) -> Vec<u32> {
-    let mut t = vec![0u32; n];
-    t[0] = a0; t[1] = a1;
-    for i in 2..n { t[i] = add(t[i - 1], t[i - 2]); }
-    t
-}
-
-#[allow(dead_code)]
-fn stark_prove(
-    trace: &[u32], h_h: &[u32; 8], rc: &RC, target: &[u32; 8],
-    weights: &[u32], inv_tab: &[u32],
-) -> (StarkProof, u64, Option<([u32; W], usize)>) {
-    let n = trace.len();
-    let dom = n * BLOWUP;
-
-    // 1. Polynomial LDE
-    let t_evals = compute_lde(trace, weights, inv_tab, dom);
-
-    // 2. Commit trace evaluations
-    let t_tree = MerkleTree::build(pack_evals(&t_evals), *h_h, rc, target);
-    let mut perms = t_tree.perms;
-    let mut ticket = t_tree.ticket;
-
-    // 3. Constraint quotient Q = (T(x+2)-T(x+1)-T(x)) / Z(x)
-    let q_evals = compute_quotient(&t_evals, n, inv_tab);
-
-    // 4. Commit quotient
-    let q_tree = MerkleTree::build(pack_evals(&q_evals), *h_h, rc, target);
-    perms += q_tree.perms;
-    if ticket.is_none() { ticket = q_tree.ticket; }
-
-    // 5. Fiat-Shamir
-    let mut fs = [0u32; W];
-    fs[..8].copy_from_slice(&t_tree.root());
-    fs[8..16].copy_from_slice(&q_tree.root());
-    fs[16] = 0x5354_4152; // "STAR"
-    poseidon2(&mut fs, rc);
-    perms += 1;
-    if ticket.is_none() {
-        if let Some(slot) = check_tickets(&fs, target) { ticket = Some((fs, slot)); }
-    }
-    let mut rng = Rng(fs[0] as u64 | ((fs[1] as u64) << 32) | 1);
-
-    // 6. Query openings
-    let qrange = dom - 2 - n; // query in [n, dom-3]
-    let mut queries = Vec::with_capacity(N_QUERIES);
-    for _ in 0..N_QUERIES {
-        let x = n + ((rng.next() as usize) % qrange);
-        queries.push(StarkQuery {
-            x,
-            t_lo: t_tree.open(x / 8),
-            t_hi: t_tree.open((x + 2) / 8),
-            q: q_tree.open(x / 8),
-        });
-    }
-
-    let proof = StarkProof {
-        a0: trace[0], a1: trace[1], trace_len: n,
-        trace_root: t_tree.root(), quotient_root: q_tree.root(),
-        boundary: t_tree.open(0), queries,
-    };
-    (proof, perms, ticket)
-}
-
-// ── STARK verifier ──────────────────────────────────────────
-
-#[allow(dead_code)]
-fn stark_verify(proof: &StarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
-    let n = proof.trace_len;
-    let dom = n * BLOWUP;
-
-    // 1. Boundary: T(0)=a0, T(1)=a1
-    if !MerkleTree::verify_path(proof.boundary.leaf, proof.boundary.idx,
-                                 &proof.boundary.path, proof.trace_root, h_h, rc) {
-        return false;
-    }
-    if proof.boundary.idx != 0
-        || proof.boundary.leaf[0] != proof.a0
-        || proof.boundary.leaf[1] != proof.a1 { return false; }
-
-    // 2. Re-derive Fiat-Shamir
-    let mut fs = [0u32; W];
-    fs[..8].copy_from_slice(&proof.trace_root);
-    fs[8..16].copy_from_slice(&proof.quotient_root);
-    fs[16] = 0x5354_4152;
-    poseidon2(&mut fs, rc);
-    let mut rng = Rng(fs[0] as u64 | ((fs[1] as u64) << 32) | 1);
-    let qrange = dom - 2 - n;
-
-    // 3. Verify each query
-    let mut q_pts: Vec<(u32, u32)> = Vec::with_capacity(N_QUERIES);
-    for q in &proof.queries {
-        let expected_x = n + ((rng.next() as usize) % qrange);
-        if q.x != expected_x { return false; }
-        if q.t_lo.idx != q.x / 8 || q.t_hi.idx != (q.x + 2) / 8 || q.q.idx != q.x / 8 {
-            return false;
-        }
-
-        // Merkle auth paths
-        if !MerkleTree::verify_path(q.t_lo.leaf, q.t_lo.idx, &q.t_lo.path, proof.trace_root, h_h, rc) { return false; }
-        if q.t_lo.idx != q.t_hi.idx {
-            if !MerkleTree::verify_path(q.t_hi.leaf, q.t_hi.idx, &q.t_hi.path, proof.trace_root, h_h, rc) { return false; }
-        }
-        if !MerkleTree::verify_path(q.q.leaf, q.q.idx, &q.q.path, proof.quotient_root, h_h, rc) { return false; }
-
-        // Extract T(x), T(x+1), T(x+2), Q(x)
-        let tx = q.t_lo.leaf[q.x % 8];
-        let tx1 = if (q.x + 1) / 8 == q.t_lo.idx { q.t_lo.leaf[(q.x + 1) % 8] } else { q.t_hi.leaf[(q.x + 1) % 8] };
-        let tx2 = q.t_hi.leaf[(q.x + 2) % 8];
-        let qx = q.q.leaf[q.x % 8];
-
-        // Constraint: Q(x) * Z(x) == T(x+2) - T(x+1) - T(x)
-        let z = vanishing_eval(q.x as u32, n);
-        if mul(qx, z) != sub(tx2, add(tx1, tx)) { return false; }
-
-        q_pts.push((q.x as u32, qx));
-    }
-
-    // 4. Linearity test: Q must be degree < 2 (linear)
-    let (x0, q0) = q_pts[0];
-    let mut dx_ref = 0u32;
-    let mut dq_ref = 0u32;
-    let mut ref_set = false;
-    for &(xi, qi) in &q_pts[1..] {
-        if xi == x0 { if qi != q0 { return false; } continue; }
-        let dx = sub(xi, x0);
-        let dq = sub(qi, q0);
-        if !ref_set { dx_ref = dx; dq_ref = dq; ref_set = true; continue; }
-        if mul(dq, dx_ref) != mul(dq_ref, dx) { return false; }
-    }
-
-    true
-}
-
 // ── Stats & display ─────────────────────────────────────────
 
 struct Stats {
@@ -1539,8 +1272,12 @@ fn run_verify(path: &str) {
     print!("Trace root  : ");
     for v in &proof.trace_root { print!("{:08x}", v); }
     println!();
+    print!("Quot. root  : ");
+    for v in &proof.quotient_root { print!("{:08x}", v); }
+    println!();
     println!("FRI layers  : {}", proof.fri_roots.len());
     println!("Queries     : {}", proof.query_positions.len());
+    println!("Blowup      : {}x", 1u32 << LOG_BLOWUP);
     print!("Target      : ");
     for v in &target { print!("{:08x}", v); }
     println!();
@@ -1573,16 +1310,54 @@ fn run_verify(path: &str) {
 
 // ── Main ────────────────────────────────────────────────────
 
+fn print_usage() {
+    println!("ZK-SPoW Symbiotic Miner — Poseidon2 Width-24 / M31");
+    println!();
+    println!("USAGE:");
+    println!("  zk-spow-miner [DIFFICULTY] [THREADS] [STARK_THREADS] [LOG_TRACE]");
+    println!("  zk-spow-miner verify <proof-file.hex>");
+    println!("  zk-spow-miner test");
+    println!();
+    println!("MODES:");
+    println!("  mine (default)  Symbiotic mining: STARK provers + PoW workers");
+    println!("  verify          Standalone proof verification from .hex file");
+    println!("  test            Run smoke tests and exit");
+    println!();
+    println!("ARGS:");
+    println!("  DIFFICULTY      PoW difficulty in bits (default: 20)");
+    println!("  THREADS         Total worker threads (default: num_cpus)");
+    println!("  STARK_THREADS   Number of STARK prover threads (default: 1)");
+    println!("  LOG_TRACE       Log2 of Fibonacci trace length (default: 8)");
+    println!();
+    println!("EXAMPLES:");
+    println!("  zk-spow-miner 16 4 1 4    # diff=16, 4 threads, 1 STARK, trace=2^4");
+    println!("  zk-spow-miner verify proof_123.hex");
+    println!("  zk-spow-miner test");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let cmd = args.get(1).map(|s| s.as_str());
 
-    // Verify mode: ./zk-spow-miner verify <proof-file>
-    if args.get(1).map(|s| s.as_str()) == Some("verify") {
+    if cmd == Some("--help") || cmd == Some("-h") || cmd == Some("help") {
+        print_usage();
+        return;
+    }
+
+    if cmd == Some("verify") {
         let path = match args.get(2) {
             Some(p) => p.as_str(),
             None => { eprintln!("Usage: zk-spow-miner verify <proof-file.hex>"); std::process::exit(1); }
         };
         run_verify(path);
+        return;
+    }
+
+    if cmd == Some("test") {
+        println!("ZK-SPoW Smoke Tests");
+        println!("───────────────────────────────────────────────────");
+        circle_smoke_test();
+        println!("All tests PASSED.");
         return;
     }
 
