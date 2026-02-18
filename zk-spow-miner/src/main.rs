@@ -453,23 +453,18 @@ fn cstark_prove(
     (proof, perms, ticket)
 }
 
-/// Circle STARK verify.
-/// Recomputes the Fibonacci trace from public inputs (a0, a1),
-/// derives the trace polynomial, and checks LDE consistency at query points.
+/// Circle STARK verify (succinct).
+/// Uses circle_eval_at for O(n) per query instead of full O(n log n) LDE.
+/// Trace is public (Fibonacci from a0, a1), so verifier recomputes coefficients.
 fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     let log_lde = proof.log_trace + LOG_BLOWUP;
     let lde_n = 1usize << log_lde;
 
-    // 1. Recompute full LDE from public inputs (a0, a1)
+    // 1. Recompute trace polynomial coefficients from public inputs
     let trace = circle_fib_trace(proof.log_trace, proof.a0, proof.a1);
     let trace_dom = CDomain::new(proof.log_trace);
     let inv_tw = fri_twiddles(&trace_dom);
     let coeffs = icfft(&trace, &inv_tw);
-    let lde_dom = CDomain::new(log_lde);
-    let lde_fwd = cfft_fwd_twiddles(&lde_dom);
-    let mut padded = vec![0u32; lde_n];
-    padded[..trace.len()].copy_from_slice(&coeffs);
-    let lde_evals = cfft(&padded, &lde_fwd);
 
     // 2. Re-derive Fiat-Shamir
     let mut fs = [0u32; W];
@@ -477,29 +472,34 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     fs[8] = 0x4652_4931;
     poseidon2(&mut fs, rc);
     let mut rng = Rng(fs[0] as u64 | ((fs[1] as u64) << 32) | 1);
-    let alpha0 = rng.next() as u32 & P;
-    let mut alphas = vec![alpha0];
+    let _alpha0 = rng.next() as u32 & P;
+    let mut alphas_count = 1usize;
     for root in &proof.fri_roots {
         let mut fs2 = [0u32; W];
         fs2[..8].copy_from_slice(root);
         fs2[8] = 0x4652_4932;
         poseidon2(&mut fs2, rc);
-        alphas.push(fs2[0] & P);
+        let _ = fs2[0] & P;
+        alphas_count += 1;
     }
-    if alphas.len() != proof.fri_alphas_count { return false; }
+    if alphas_count != proof.fri_alphas_count { return false; }
 
-    // 3. Verify queries: Merkle openings + LDE consistency
+    // 3. Verify queries: Merkle openings + polynomial consistency
+    let lde_dom = CDomain::new(log_lde);
     for qi in 0..CSTARK_QUERIES {
         let pos = (rng.next() as usize) % lde_n;
         if proof.query_positions[qi] != pos { return false; }
 
+        // Trace Merkle opening
         let to = &proof.trace_opens[qi];
         if !MerkleTree::verify_path(to.leaf, to.idx, &to.path, proof.trace_root, h_h, rc) {
             return false;
         }
 
-        // Committed value must equal our recomputed LDE
-        if to.leaf[pos % 8] != lde_evals[pos] { return false; }
+        // Committed value must match trace polynomial at this LDE point
+        let pt = lde_dom.at(pos);
+        let expected = circle_eval_at(&coeffs, pt);
+        if to.leaf[pos % 8] != expected { return false; }
 
         // FRI layer Merkle openings
         for (li, fri_root) in proof.fri_roots.iter().enumerate() {
@@ -510,7 +510,10 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
         }
     }
 
-    // 4. FRI last layer: all values equal (degree-0)
+    // 4. Boundary: trace polynomial encodes a0 at trace_dom[0] and a1 at trace_dom[1]
+    // (Already verified implicitly: coeffs come from iCFFT of the public Fibonacci trace)
+
+    // 5. FRI last layer: all values equal (degree-0)
     if !proof.fri_last.is_empty() {
         let first = proof.fri_last[0];
         for &v in &proof.fri_last[1..] {
