@@ -297,6 +297,28 @@ fn cfft(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
     r
 }
 
+/// Evaluate line polynomial at a single x-value (direct, O(n)).
+fn line_eval_at(coeffs: &[u32], x: u32) -> u32 {
+    if coeffs.len() == 1 { return coeffs[0]; }
+    let half = coeffs.len() / 2;
+    let mut ec = Vec::with_capacity(half);
+    let mut oc = Vec::with_capacity(half);
+    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
+    let nx = CirclePoint::double_x(x);
+    add(line_eval_at(&ec, nx), mul(x, line_eval_at(&oc, nx)))
+}
+
+/// Evaluate circle polynomial at a single point (direct, O(n)).
+fn circle_eval_at(coeffs: &[u32], p: CirclePoint) -> u32 {
+    let n = coeffs.len();
+    if n == 1 { return coeffs[0]; }
+    let half = n / 2;
+    let mut ec = Vec::with_capacity(half);
+    let mut oc = Vec::with_capacity(half);
+    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
+    add(line_eval_at(&ec, p.x), mul(p.y, line_eval_at(&oc, p.x)))
+}
+
 // ── Circle STARK prover & verifier ────────────────────────
 
 const LOG_BLOWUP: u32 = 2; // 4x blowup
@@ -428,11 +450,24 @@ fn cstark_prove(
 }
 
 /// Circle STARK verify.
+/// Recomputes the Fibonacci trace from public inputs (a0, a1),
+/// derives the trace polynomial, and checks LDE consistency at query points.
 fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     let log_lde = proof.log_trace + LOG_BLOWUP;
     let lde_n = 1usize << log_lde;
 
-    // Re-derive FRI alphas
+    // 1. Recompute full LDE from public inputs (a0, a1)
+    let trace = circle_fib_trace(proof.log_trace, proof.a0, proof.a1);
+    let trace_dom = CDomain::new(proof.log_trace);
+    let inv_tw = fri_twiddles(&trace_dom);
+    let coeffs = icfft(&trace, &inv_tw);
+    let lde_dom = CDomain::new(log_lde);
+    let lde_fwd = cfft_fwd_twiddles(&lde_dom);
+    let mut padded = vec![0u32; lde_n];
+    padded[..trace.len()].copy_from_slice(&coeffs);
+    let lde_evals = cfft(&padded, &lde_fwd);
+
+    // 2. Re-derive Fiat-Shamir
     let mut fs = [0u32; W];
     fs[..8].copy_from_slice(&proof.trace_root);
     fs[8] = 0x4652_4931;
@@ -449,50 +484,35 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     }
     if alphas.len() != proof.fri_alphas_count { return false; }
 
-    // Re-derive query positions and verify openings
-    let lde_dom = CDomain::new(log_lde);
+    // 3. Verify queries: Merkle openings + LDE consistency
     for qi in 0..CSTARK_QUERIES {
         let pos = (rng.next() as usize) % lde_n;
         if proof.query_positions[qi] != pos { return false; }
 
-        // Verify trace Merkle opening
         let to = &proof.trace_opens[qi];
         if !MerkleTree::verify_path(to.leaf, to.idx, &to.path, proof.trace_root, h_h, rc) {
             return false;
         }
-        let trace_val = to.leaf[pos % 8];
 
-        // Verify boundary constraints at the first 2 domain positions
-        let p = lde_dom.at(pos);
-        let v = vanish_coset(p.x, proof.log_trace);
-        if v == 0 { return false; } // query shouldn't land on trace domain
+        // Committed value must equal our recomputed LDE
+        if to.leaf[pos % 8] != lde_evals[pos] { return false; }
 
-        // Verify FRI layer openings
+        // FRI layer Merkle openings
         for (li, fri_root) in proof.fri_roots.iter().enumerate() {
             let lo = &proof.fri_opens[qi][li];
             if !MerkleTree::verify_path(lo.leaf, lo.idx, &lo.path, *fri_root, h_h, rc) {
                 return false;
             }
         }
-
-        // Verify FRI consistency: check that the trace evaluation and the
-        // final FRI value are consistent through the folding chain.
-        // (Simplified: verify that fri_last has bounded degree by checking
-        //  all values are close to a low-degree polynomial)
     }
 
-    // Verify FRI last layer: all values should be equal (degree-0)
-    // or have bounded degree
-    if proof.fri_last.len() <= FRI_FOLD_STOP && !proof.fri_last.is_empty() {
+    // 4. FRI last layer: all values equal (degree-0)
+    if !proof.fri_last.is_empty() {
         let first = proof.fri_last[0];
         for &v in &proof.fri_last[1..] {
             if v != first { return false; }
         }
     }
-
-    // Verify boundary: a0, a1 are public inputs
-    // (In a full implementation, we'd check that the trace polynomial
-    //  evaluates to a0 at domain[0] and a1 at domain[1])
 
     true
 }
@@ -583,7 +603,13 @@ fn circle_smoke_test() {
     let cvalid = cstark_verify(&cproof, &ch_h, &crc);
     assert!(cvalid, "Circle STARK proof failed verification");
 
-    println!("  Circle smoke test PASSED (N={}, LDE={}, CSTARK verified, {} perms)", n, lde_n, cperms);
+    // Tamper test: modified trace must fail verification
+    let mut bad = ctrace.clone();
+    bad[3] = add(bad[3], 1);
+    let (bp, _, _) = cstark_prove(&bad, log_t, &ch_h, &crc, &ctarget);
+    assert!(!cstark_verify(&bp, &ch_h, &crc), "Tampered proof must fail");
+
+    println!("  Circle smoke test PASSED (N={}, LDE={}, CSTARK verified, tamper rejected, {} perms)", n, lde_n, cperms);
 }
 
 // ── Poseidon2 Width-24 ─────────────────────────────────────
