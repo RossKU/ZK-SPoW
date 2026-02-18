@@ -495,13 +495,13 @@ Nockchain [11] is a Layer-1 blockchain using Zero-Knowledge Proof of Work (zkPoW
 
 | | Nockchain (zkPoW) | ZK-SPoW |
 |---|---|---|
-| PoW structure | hash(ZK proof) < T | Poseidon2 output < T |
-| ZK–PoW coupling | External: proof hashed separately | **Internal**: STARK hash *is* PoW hash |
+| PoW hash | hash(ZK proof) < T | Poseidon2 output < T |
+| PoW hash generation | Two-step: ZK proof → external hash | **Single-step**: STARK Merkle hash = PoW hash |
 | ZK overhead | 100% (every cycle is ZK) | ~10% (SRAM-bandwidth-limited) |
-| Field | Goldilocks (2^64 − 2^32 + 1) | M31 (2^31 − 1) |
+| Field / output | Goldilocks (64-bit), 256-bit hash | M31 (31-bit), 248-bit output |
 | Hardware target | GPU | ASIC-optimized |
 | Useful work | ZK proof of puzzle | STARK Merkle hashing |
-| STARK enforcement | Mandatory (proof = block) | Market-driven (Option C) |
+| STARK enforcement | Mandatory (proof = block) | Market-driven |
 
 The key architectural difference: in Nockchain, the ZK proof is computed first, then hashed externally for PoW — two disjoint steps. In ZK-SPoW, the internal STARK Merkle hash *directly* produces the PoW output from a single Poseidon2 permutation, with zero additional overhead. This tight coupling enables the complementary bottleneck structure (§4.6): PoW fills idle Poseidon2 cycles while STARK is memory-bound, whereas Nockchain's sequential proof-then-hash architecture does not exploit resource complementarity.
 

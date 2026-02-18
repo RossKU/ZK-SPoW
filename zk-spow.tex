@@ -645,13 +645,13 @@ Nockchain~\cite{nockchain} is a Layer-1 blockchain using Zero-Knowledge Proof of
 \toprule
 & Nockchain (zkPoW) & ZK-SPoW \\
 \midrule
-PoW structure & $\mathrm{hash}(\text{ZK proof}) < T$ & Poseidon2 output $< T$ \\
-ZK--PoW coupling & External: proof hashed separately & \textbf{Internal}: STARK hash \emph{is} PoW hash \\
+PoW hash & $\mathrm{hash}(\text{ZK proof}) < T$ & Poseidon2 output $< T$ \\
+PoW hash generation & Two-step: ZK proof $\to$ external hash & \textbf{Single-step}: STARK Merkle hash = PoW hash \\
 ZK overhead & 100\% (every cycle is ZK) & ${\sim}10\%$ (SRAM-bandwidth-limited) \\
-Field & Goldilocks ($2^{64} - 2^{32} + 1$) & M31 ($2^{31} - 1$) \\
+Field / output & Goldilocks (64-bit), 256-bit hash & M31 (31-bit), 248-bit output \\
 Hardware target & GPU & ASIC-optimized \\
 Useful work & ZK proof of puzzle & STARK Merkle hashing \\
-STARK enforcement & Mandatory (proof = block) & Market-driven (Option~C) \\
+STARK enforcement & Mandatory (proof = block) & Market-driven \\
 \bottomrule
 \end{tabular}
 \caption{Nockchain vs ZK-SPoW.}
