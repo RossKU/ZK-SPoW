@@ -489,17 +489,23 @@ Poseidon2's security against quantum adversaries:
 
 ## 7. Comparison with Prior Work
 
-### 7.1 STARK Enforcement
+### 7.1 Nockchain (zkPoW)
 
-Three options were evaluated for STARK enforcement:
+Nockchain [11] is a Layer-1 blockchain using Zero-Knowledge Proof of Work (zkPoW), launched in May 2025. Miners compute a ZK proof of a deterministic puzzle (populating a binary tree with Goldilocks field elements), then hash the proof; the hash must meet a difficulty target. This is the closest deployed system to ZK-SPoW.
 
-| Option | STARK requirement | Bandwidth impact | ZK-SPoW benefit |
-|--------|------------------|-----------------|-------------------|
-| A | Every block | +3–5 MB/s | Maximum (strict ZK binding) |
-| B | Every N blocks | +50 KB/s (N=100) | Partial |
-| **C** | **None** | **None** | **Market-driven (U≈67% when ZK active)** |
+| | Nockchain (zkPoW) | ZK-SPoW |
+|---|---|---|
+| PoW structure | hash(ZK proof) < T | Poseidon2 output < T |
+| ZK–PoW coupling | External: proof hashed separately | **Internal**: STARK hash *is* PoW hash |
+| ZK overhead | 100% (every cycle is ZK) | ~10% (SRAM-bandwidth-limited) |
+| Field | Goldilocks (2^64 − 2^32 + 1) | M31 (2^31 − 1) |
+| Hardware target | GPU | ASIC-optimized |
+| Useful work | ZK proof of puzzle | STARK Merkle hashing |
+| STARK enforcement | Mandatory (proof = block) | Market-driven (Option C) |
 
-Option C was selected because it preserves Kaspa's existing bandwidth profile while enabling symbiotic operation through economic incentives rather than protocol enforcement.
+The key architectural difference: in Nockchain, the ZK proof is computed first, then hashed externally for PoW — two disjoint steps. In ZK-SPoW, the internal STARK Merkle hash *directly* produces the PoW output from a single Poseidon2 permutation, with zero additional overhead. This tight coupling enables the complementary bottleneck structure (§4.6): PoW fills idle Poseidon2 cycles while STARK is memory-bound, whereas Nockchain's sequential proof-then-hash architecture does not exploit resource complementarity.
+
+Nockchain mandates ZK proofs in every block. ZK-SPoW takes a market-driven approach (no mandatory proofs; ZK adoption through economic incentives), preserving Kaspa's bandwidth profile at 100 BPS.
 
 ### 7.2 Relationship to Ball et al.
 
@@ -1008,3 +1014,5 @@ The quantity q = 1 − (1−p)³ used in §6.4 and Appendix B.3 is exact under P
 [9] Bar-On, Y., Komargodski, I., & Weinstein, O. (2025). "Proof of Work With External Utilities." arXiv:2505.21685. https://arxiv.org/abs/2505.21685
 
 [10] Plonky3. "A Toolkit for Polynomial IOPs." `poseidon2/src/round_numbers.rs`, `mersenne-31/src/poseidon2.rs`. https://github.com/Plonky3/Plonky3 (accessed 2026-02-16).
+
+[11] Nockchain. "The zkPoW L1." https://www.nockchain.org/ (accessed 2026-02-18).

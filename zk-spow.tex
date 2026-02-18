@@ -634,27 +634,33 @@ Poseidon2's security against quantum adversaries:
 \section{Comparison with Prior Work}
 \label{sec:comparison}
 
-\subsection{STARK Enforcement}
+\subsection{Nockchain (zkPoW)}
 
-Three options were evaluated for STARK enforcement:
+Nockchain~\cite{nockchain} is a Layer-1 blockchain using Zero-Knowledge Proof of Work (zkPoW), launched in May 2025. Miners compute a ZK proof of a deterministic puzzle (populating a binary tree with Goldilocks field elements), then hash the proof; the hash must meet a difficulty target. This is the closest deployed system to ZK-SPoW.
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{@{}llll@{}}
+\begin{tabular}{@{}lll@{}}
 \toprule
-Option & STARK requirement & Bandwidth impact & ZK-SPoW benefit \\
+& Nockchain (zkPoW) & ZK-SPoW \\
 \midrule
-A & Every block & +3--5~MB/s & Maximum (strict ZK binding) \\
-B & Every $N$ blocks & +50~KB/s ($N{=}100$) & Partial \\
-\textbf{C} & \textbf{None} & \textbf{None} & \textbf{Market-driven ($U{\approx}67\%$ when ZK active)} \\
+PoW structure & $\mathrm{hash}(\text{ZK proof}) < T$ & Poseidon2 output $< T$ \\
+ZK--PoW coupling & External: proof hashed separately & \textbf{Internal}: STARK hash \emph{is} PoW hash \\
+ZK overhead & 100\% (every cycle is ZK) & ${\sim}10\%$ (SRAM-bandwidth-limited) \\
+Field & Goldilocks ($2^{64} - 2^{32} + 1$) & M31 ($2^{31} - 1$) \\
+Hardware target & GPU & ASIC-optimized \\
+Useful work & ZK proof of puzzle & STARK Merkle hashing \\
+STARK enforcement & Mandatory (proof = block) & Market-driven (Option~C) \\
 \bottomrule
 \end{tabular}
-\caption{Option~C rationale: STARK enforcement alternatives.}
-\label{tab:option-c}
+\caption{Nockchain vs ZK-SPoW.}
+\label{tab:nockchain}
 \end{table}
 
-Option~C was selected because it preserves Kaspa's existing bandwidth profile while enabling symbiotic operation through economic incentives rather than protocol enforcement.
+The key architectural difference: in Nockchain, the ZK proof is computed first, then hashed externally for PoW---two disjoint steps. In ZK-SPoW, the internal STARK Merkle hash \emph{directly} produces the PoW output from a single Poseidon2 permutation, with zero additional overhead. This tight coupling enables the complementary bottleneck structure (\S\ref{sec:bottleneck}): PoW fills idle Poseidon2 cycles while STARK is memory-bound, whereas Nockchain's sequential proof-then-hash architecture does not exploit resource complementarity.
+
+Nockchain mandates ZK proofs in every block. ZK-SPoW takes a market-driven approach (no mandatory proofs; ZK adoption through economic incentives), preserving Kaspa's bandwidth profile at 100~BPS.
 
 \subsection{Relationship to Ball et al.}
 
@@ -1222,6 +1228,11 @@ Plonky3,
 ``A Toolkit for Polynomial IOPs,''
 \texttt{poseidon2/src/round\_numbers.rs}, \texttt{mersenne-31/src/poseidon2.rs}.
 \url{https://github.com/Plonky3/Plonky3} (accessed 2026-02-16).
+
+\bibitem{nockchain}
+Nockchain,
+``The zkPoW L1.''
+\url{https://www.nockchain.org/} (accessed 2026-02-18).
 
 \end{thebibliography}
 
