@@ -166,19 +166,19 @@ Total: 2 permutations per Merkle hash
 
 Three approaches to integrate header digest into the Merkle hash:
 
-| Design | Width | Mode | Perm/hash | PoW tickets | Core area Δ | Die area Δ |
-|--------|-------|------|-----------|-------------|-------------|------------|
-| A: 3rd absorb | 16 | Sponge | 3 (+50%) | 1 per 3 perm | 0% | 0% |
-| B: Width 20 | 20 | Compression | 1 | 2 (+4 wasted) | +22% | ~+11% |
-| **C: Width 24** | **24** | **Compression** | **1** | **3** | **+44–105%** | **~+22–50%** |
+| Design | Width | Mode | Perm/Merkle | Perm/PoW | Core area Δ | Die area Δ |
+|--------|-------|------|-------------|----------|-------------|------------|
+| A: Header re-hash | 16 | Sponge | 2 | 4 | 0% | 0% |
+| B: Width 20 | 20 | Compression | 1 | 1 | +22% | ~+11% |
+| **C: Width 24** | **24** | **Compression** | **1** | **1** | **+44–105%** | **~+22–50%** |
 
-**Design A:** No Poseidon2 modification. Standard width-16 sponge with 3 absorptions (left, right, header). 3 permutations per Merkle hash. PoW output is available only after the final permutation, yielding 1 ticket per 3 permutations — a 6× lower PoW rate per permutation than Design C. STARK throughput per permutation is 1/3 that of compression function mode (1 hash per 3 perm vs 1 hash per 1 perm), though under SRAM-bandwidth-bound operation (§4.6) the bottleneck is memory, not compute.
+**Design A:** No Poseidon2 modification. Standard width-16 sponge Merkle hash (2 permutations: absorb left\_child, absorb right\_child). To bind the header for PoW, a *second* sponge hash is required: sponge(merkle\_parent, header\_digest) → pow\_hash (2 additional permutations). Total: **4 permutations per PoW draw**, vs 1 for compression function mode. The STARK tree itself is unmodified (2 perm/node), but each PoW draw doubles the permutation cost.
 
-**Design B:** Extend to width 20 with header\_digest[4]. Compression function mode, 1 permutation per hash, 2 PoW tickets (S[0..7], S[8..15]). However, header digest is only 4 M31 elements (124 bits), giving a birthday collision bound of 2^62 — well below the 128-bit security target. Asymmetric 8+8+4 I/O with 4 wasted output elements.
+**Design B:** Extend to width 20 with header\_digest[4]. Compression function mode, 1 permutation per Merkle hash and per PoW draw. However, header digest is only 4 M31 elements (124 bits), giving a birthday collision bound of 2^62 — well below the 128-bit security target. Asymmetric 8+8+4 I/O with 4 wasted output elements.
 
-**Design C (selected):** Extend to width 24 with header digest[8]. Symmetric 8+8+8 I/O — all output elements are useful. **3 PoW tickets per permutation** (S[0..7], S[8..15], and S[16..23]; S[0..7] doubles as merkle\_parent in Symbiotic mode). Header digest security doubles (248 vs 124 bits). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see §4.6). The width extension cost manifests as U = 16/24 ≈ 67% (§1.2). **Requires Stwo-Kaspa verifier** supporting Width-24 compression function mode (see §1.3).
+**Design C (selected):** Extend to width 24 with header\_digest[8]. Symmetric 8+8+8 I/O — header digest is baked into every Merkle hash, so each permutation simultaneously advances the STARK tree and produces a PoW-checkable output. **1 permutation per Merkle hash and per PoW draw**, with zero additional overhead. S[0..7] serves as both merkle\_parent (STARK) and PoW output. Header digest: 248 bits (birthday bound 2^124). Width 24 is within the Poseidon2 paper's analyzed parameter range [3]. **ZK throughput is unaffected**: STARK Merkle hashing is SRAM-bandwidth-bound regardless of core width (see §4.6). The width extension cost manifests as U = 16/24 ≈ 67% (§1.2). **Requires Stwo-Kaspa verifier** supporting Width-24 compression function mode (see §1.3).
 
-**Design A vs C tradeoff.** Design A requires no Stwo modification and uses well-analyzed Width-16 parameters. However, sponge mode fundamentally limits both PoW and STARK efficiency per permutation: 1 ticket per 3 permutations vs Design C's 3 tickets per 1 permutation (9× per-permutation gap). Even after accounting for Design A's smaller cores (more cores per die), Design C yields ~3× higher aggregate PoW hashrate per die. Design C also simplifies scheduling (each permutation is stateless, vs sponge state tracking across 3 absorptions). The cost: Design C requires a Width-24 Stwo-Kaspa verifier (§8.3) and +44–105% core area overhead.
+**Design A vs C tradeoff.** Design A requires no Stwo modification and uses well-analyzed Width-16 parameters. However, each PoW draw costs 4 permutations (2 Merkle + 2 header binding), while Design C completes both Merkle hash and PoW draw in a single permutation. Accounting for Design A's smaller cores (more cores per die), Design C still yields ~2× higher aggregate PoW throughput per die. Design C also simplifies scheduling (each permutation is stateless, vs sponge state tracking). The cost: Design C requires a Width-24 Stwo-Kaspa verifier (§8.3) and +44–105% core area overhead.
 
 #### 3.2.3 Proposed Extension (Design C)
 
