@@ -524,6 +524,124 @@ fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     true
 }
 
+// ── Proof serialization ──────────────────────────────────
+
+fn words_to_hex(words: &[u32]) -> String {
+    let mut s = String::with_capacity(words.len() * 8);
+    for w in words { s.push_str(&format!("{:08x}", w)); }
+    s
+}
+
+fn hex_to_words(hex: &str) -> Option<Vec<u32>> {
+    let hex = hex.trim();
+    if hex.len() % 8 != 0 { return None; }
+    let b = hex.as_bytes();
+    let mut v = Vec::with_capacity(hex.len() / 8);
+    for i in (0..b.len()).step_by(8) {
+        let s = std::str::from_utf8(&b[i..i+8]).ok()?;
+        v.push(u32::from_str_radix(s, 16).ok()?);
+    }
+    Some(v)
+}
+
+fn encode_leaf(buf: &mut Vec<u32>, lo: &LeafOpen) {
+    buf.push(lo.idx as u32);
+    buf.extend_from_slice(&lo.leaf);
+    buf.push(lo.path.len() as u32);
+    for p in &lo.path { buf.extend_from_slice(p); }
+}
+
+fn decode_leaf(d: &[u32], i: &mut usize) -> Option<LeafOpen> {
+    let idx = *d.get(*i)? as usize; *i += 1;
+    if *i + 8 > d.len() { return None; }
+    let mut leaf = [0u32; 8];
+    leaf.copy_from_slice(&d[*i..*i+8]); *i += 8;
+    let plen = *d.get(*i)? as usize; *i += 1;
+    let mut path = Vec::with_capacity(plen);
+    for _ in 0..plen {
+        if *i + 8 > d.len() { return None; }
+        let mut p = [0u32; 8];
+        p.copy_from_slice(&d[*i..*i+8]); *i += 8;
+        path.push(p);
+    }
+    Some(LeafOpen { idx, leaf, path })
+}
+
+fn rd(d: &[u32], i: &mut usize) -> Option<u32> {
+    let v = *d.get(*i)?; *i += 1; Some(v)
+}
+
+fn rd8(d: &[u32], i: &mut usize) -> Option<[u32; 8]> {
+    if *i + 8 > d.len() { return None; }
+    let mut a = [0u32; 8]; a.copy_from_slice(&d[*i..*i+8]); *i += 8; Some(a)
+}
+
+/// Encode proof + mining context into a word array.
+fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
+                ticket_state: &[u32; W], ticket_slot: usize) -> Vec<u32> {
+    let mut b = Vec::new();
+    b.push(0x4353_544B); // magic "CSTK"
+    b.push(1);            // version
+    b.push(proof.a0); b.push(proof.a1); b.push(proof.log_trace);
+    b.extend_from_slice(&proof.trace_root);
+    b.push(proof.fri_roots.len() as u32);
+    for r in &proof.fri_roots { b.extend_from_slice(r); }
+    b.push(proof.fri_last.len() as u32);
+    for &v in &proof.fri_last { b.push(v); }
+    b.push(proof.fri_alphas_count as u32);
+    b.push(proof.query_positions.len() as u32);
+    for qi in 0..proof.query_positions.len() {
+        b.push(proof.query_positions[qi] as u32);
+        encode_leaf(&mut b, &proof.trace_opens[qi]);
+        b.push(proof.fri_opens[qi].len() as u32);
+        for lo in &proof.fri_opens[qi] { encode_leaf(&mut b, lo); }
+    }
+    b.extend_from_slice(h_h);
+    b.extend_from_slice(target);
+    b.push(ticket_slot as u32);
+    b.extend_from_slice(ticket_state);
+    b
+}
+
+/// Decode proof + mining context from a word array.
+fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W], usize)> {
+    let mut i = 0;
+    if rd(d, &mut i)? != 0x4353_544B { return None; }
+    if rd(d, &mut i)? != 1 { return None; }
+    let a0 = rd(d, &mut i)?;
+    let a1 = rd(d, &mut i)?;
+    let log_trace = rd(d, &mut i)?;
+    let trace_root = rd8(d, &mut i)?;
+    let nf = rd(d, &mut i)? as usize;
+    let mut fri_roots = Vec::with_capacity(nf);
+    for _ in 0..nf { fri_roots.push(rd8(d, &mut i)?); }
+    let nl = rd(d, &mut i)? as usize;
+    let mut fri_last = Vec::with_capacity(nl);
+    for _ in 0..nl { fri_last.push(rd(d, &mut i)?); }
+    let fri_alphas_count = rd(d, &mut i)? as usize;
+    let nq = rd(d, &mut i)? as usize;
+    let mut qp = Vec::with_capacity(nq);
+    let mut to = Vec::with_capacity(nq);
+    let mut fo: Vec<Vec<LeafOpen>> = Vec::with_capacity(nq);
+    for _ in 0..nq {
+        qp.push(rd(d, &mut i)? as usize);
+        to.push(decode_leaf(d, &mut i)?);
+        let layers = rd(d, &mut i)? as usize;
+        let mut ls = Vec::with_capacity(layers);
+        for _ in 0..layers { ls.push(decode_leaf(d, &mut i)?); }
+        fo.push(ls);
+    }
+    let h_h = rd8(d, &mut i)?;
+    let target = rd8(d, &mut i)?;
+    let slot = rd(d, &mut i)? as usize;
+    if i + W > d.len() { return None; }
+    let mut ts = [0u32; W]; ts.copy_from_slice(&d[i..i+W]);
+    Some((CStarkProof {
+        a0, a1, log_trace, trace_root, fri_roots, fri_last,
+        query_positions: qp, trace_opens: to, fri_opens: fo, fri_alphas_count,
+    }, h_h, target, ts, slot))
+}
+
 /// Circle STARK smoke test — verify circle group, domain, and FRI.
 fn circle_smoke_test() {
     let g = CirclePoint::GEN;
@@ -1192,6 +1310,15 @@ fn stark_worker(
                 print!("Ticket      : ");
                 for j in 0..8 { if j > 0 { print!(","); } print!("{:08x}", state[slot * 8 + j]); }
                 println!();
+                // Serialize proof + write to file
+                let proof_words = encode_proof(&proof, &h_h, &target, &state, slot);
+                let proof_hex = words_to_hex(&proof_words);
+                let proof_path = format!("proof_{}.hex", proof_id);
+                let wrote = std::fs::write(&proof_path, &proof_hex).is_ok();
+                println!("Proof size  : {} bytes ({} words)", proof_words.len() * 4, proof_words.len());
+                if wrote {
+                    println!("Proof file  : {}", proof_path);
+                }
                 println!("=== END CERTIFICATE ===");
             }
             return;
@@ -1263,10 +1390,77 @@ fn compute_h_h(header: &[u32; 8], rc: &RC) -> [u32; 8] {
     h_h
 }
 
+// ── Standalone verifier ──────────────────────────────────────
+
+fn run_verify(path: &str) {
+    let hex = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("Cannot read {}: {}", path, e); std::process::exit(1); }
+    };
+    let words = match hex_to_words(&hex) {
+        Some(w) => w,
+        None => { eprintln!("Invalid hex in proof file"); std::process::exit(1); }
+    };
+    let (proof, h_h, target, ticket_state, ticket_slot) = match decode_proof(&words) {
+        Some(v) => v,
+        None => { eprintln!("Invalid proof format"); std::process::exit(1); }
+    };
+    let rc = gen_rc();
+
+    println!("=== ZK-SPoW PROOF VERIFICATION ===");
+    println!("AIR         : Fibonacci(a0={}, a1={}, len=2^{})", proof.a0, proof.a1, proof.log_trace);
+    println!("Field       : M31 (p=2^31-1)");
+    println!("Domain      : Circle C(M31), |C|=2^31");
+    print!("Trace root  : ");
+    for v in &proof.trace_root { print!("{:08x}", v); }
+    println!();
+    println!("FRI layers  : {}", proof.fri_roots.len());
+    println!("Queries     : {}", proof.query_positions.len());
+    print!("Target      : ");
+    for v in &target { print!("{:08x}", v); }
+    println!();
+    println!("Proof size  : {} bytes ({} words)", words.len() * 4, words.len());
+    println!("─────────────────────────────────");
+
+    // 1. Verify STARK proof
+    let stark_ok = cstark_verify(&proof, &h_h, &rc);
+    println!("STARK       : {}", if stark_ok { "PASS" } else { "FAIL" });
+
+    // 2. Verify PoW ticket below target
+    let ticket = &ticket_state[ticket_slot * 8..(ticket_slot + 1) * 8];
+    let pow_ok = ticket_lt(ticket, &target);
+    print!("Ticket      : ");
+    for j in 0..8 { if j > 0 { print!(","); } print!("{:08x}", ticket[j]); }
+    println!();
+    println!("PoW         : {}", if pow_ok { "PASS" } else { "FAIL" });
+
+    // 3. Verify Fibonacci trace correctness (boundary check)
+    let trace = circle_fib_trace(proof.log_trace, proof.a0, proof.a1);
+    let fib_ok = trace[0] == proof.a0 && trace[1] == proof.a1;
+    println!("Boundary    : {}", if fib_ok { "PASS" } else { "FAIL" });
+
+    let all_ok = stark_ok && pow_ok && fib_ok;
+    println!("─────────────────────────────────");
+    println!("Result      : {}", if all_ok { "VALID" } else { "INVALID" });
+    println!("=== END VERIFICATION ===");
+    std::process::exit(if all_ok { 0 } else { 1 });
+}
+
 // ── Main ────────────────────────────────────────────────────
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    // Verify mode: ./zk-spow-miner verify <proof-file>
+    if args.get(1).map(|s| s.as_str()) == Some("verify") {
+        let path = match args.get(2) {
+            Some(p) => p.as_str(),
+            None => { eprintln!("Usage: zk-spow-miner verify <proof-file.hex>"); std::process::exit(1); }
+        };
+        run_verify(path);
+        return;
+    }
+
     let difficulty: u32 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let n_threads: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or_else(num_cpus);
     let n_stark: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(1.min(n_threads));
