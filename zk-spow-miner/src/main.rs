@@ -334,12 +334,14 @@ struct CStarkProof {
     a1: u32,
     log_trace: u32,
     trace_root: [u32; 8],
-    // FRI layers: (merkle_root, folded_values_if_last_layer)
+    quotient_root: [u32; 8],
+    // FRI layers (on quotient polynomial)
     fri_roots: Vec<[u32; 8]>,
     fri_last: Vec<u32>,
-    // Query openings per query: (position, trace_leaf+path, fri_layer_leaves+paths)
+    // Query openings
     query_positions: Vec<usize>,
     trace_opens: Vec<LeafOpen>,
+    quotient_opens: Vec<LeafOpen>,
     fri_opens: Vec<Vec<LeafOpen>>, // fri_opens[query][layer]
     fri_alphas_count: usize,
 }
@@ -377,10 +379,37 @@ fn cstark_prove(
     let mut perms = t_tree.perms;
     let mut ticket = t_tree.ticket;
 
-    // 3. Fiat-Shamir: derive FRI alphas from trace root
+    // 3. Constraint quotient (Stwo-style: evaluation-based)
+    // c[i] = trace[(i+2)%n] - trace[(i+1)%n] - trace[i] on trace domain
+    let mut c_vals = vec![0u32; n];
+    for i in 0..n {
+        c_vals[i] = sub(trace[(i + 2) % n], add(trace[(i + 1) % n], trace[i]));
+    }
+    let c_coeffs = icfft(&c_vals, &trace_inv_tw);
+    let mut c_padded = vec![0u32; lde_n];
+    c_padded[..n].copy_from_slice(&c_coeffs);
+    let c_lde = cfft(&c_padded, &lde_fwd_tw);
+    // Z_boundary: vanishes at last 2 trace positions (where constraint wraps)
+    let half_n = n / 2;
+    let x_b0 = trace_dom.half[half_n - 2].x;
+    let x_b1 = trace_dom.half[half_n - 1].x;
+    // Q[j] = C_lde[j] * Z_boundary(P_j) / V_full(P_j)
+    let mut q_evals = Vec::with_capacity(lde_n);
+    for j in 0..lde_n {
+        let pt = lde_dom.at(j);
+        let z_val = mul(sub(pt.x, x_b0), sub(pt.x, x_b1));
+        let v_val = vanish_coset(pt.x, log_trace);
+        q_evals.push(mul(mul(c_lde[j], z_val), inv(v_val)));
+    }
+    let q_tree = MerkleTree::build(pack_evals(&q_evals), *h_h, rc, target);
+    perms += q_tree.perms;
+    if ticket.is_none() { ticket = q_tree.ticket; }
+
+    // 4. Fiat-Shamir: derive FRI alphas from trace_root + quotient_root
     let mut fs = [0u32; W];
     fs[..8].copy_from_slice(&t_tree.root());
-    fs[8] = 0x4652_4931; // "FRI1"
+    fs[8..16].copy_from_slice(&q_tree.root());
+    fs[16] = 0x4652_4931; // "FRI1"
     poseidon2(&mut fs, rc);
     perms += 1;
     if ticket.is_none() {
@@ -388,11 +417,11 @@ fn cstark_prove(
     }
     let mut rng = Rng(fs[0] as u64 | ((fs[1] as u64) << 32) | 1);
 
-    // 4. FRI commit phase: fold LDE evaluations down
+    // 5. FRI commit phase: fold quotient evaluations down
     let lde_inv_tw = fri_twiddles(&lde_dom);
     let mut fri_roots: Vec<[u32; 8]> = Vec::new();
     let mut fri_trees: Vec<MerkleTree> = Vec::new();
-    let mut current = lde_evals.clone();
+    let mut current = q_evals;
     let mut cur_inv_tw = &lde_inv_tw[..];
 
     // First fold: circle → line
@@ -407,7 +436,6 @@ fn cstark_prove(
         perms += tree.perms;
         if ticket.is_none() { ticket = tree.ticket; }
         fri_roots.push(tree.root());
-        // Derive next alpha from this commitment
         let mut fs2 = [0u32; W];
         fs2[..8].copy_from_slice(&tree.root());
         fs2[8] = 0x4652_4932; // "FRI2"
@@ -424,21 +452,24 @@ fn cstark_prove(
     }
     let fri_last = current;
 
-    // 5. Query phase
+    // 6. Query phase
     let mut query_positions = Vec::with_capacity(CSTARK_QUERIES);
     let mut trace_opens = Vec::with_capacity(CSTARK_QUERIES);
+    let mut quotient_opens = Vec::with_capacity(CSTARK_QUERIES);
     let mut fri_opens: Vec<Vec<LeafOpen>> = Vec::with_capacity(CSTARK_QUERIES);
-    let lde_leaves = t_tree.layers[0].len();
+    let t_leaves = t_tree.layers[0].len();
+    let q_leaves = q_tree.layers[0].len();
     for _ in 0..CSTARK_QUERIES {
         let pos = (rng.next() as usize) % lde_n;
-        let leaf_idx = pos / 8;
         query_positions.push(pos);
-        trace_opens.push(t_tree.open(leaf_idx.min(lde_leaves - 1)));
+        trace_opens.push(t_tree.open((pos / 8).min(t_leaves - 1)));
+        quotient_opens.push(q_tree.open((pos / 8).min(q_leaves - 1)));
         let mut layer_opens = Vec::new();
-        for tree in &fri_trees {
+        for (li, tree) in fri_trees.iter().enumerate() {
             let sz = tree.layers[0].len();
-            let li = (pos / 8).min(sz - 1);
-            layer_opens.push(tree.open(li));
+            let layer_size = lde_n >> (li + 1);
+            let fp = pos % layer_size;
+            layer_opens.push(tree.open((fp / 8).min(sz - 1)));
         }
         fri_opens.push(layer_opens);
     }
@@ -446,72 +477,109 @@ fn cstark_prove(
     let proof = CStarkProof {
         a0: trace[0], a1: trace[1], log_trace,
         trace_root: t_tree.root(),
+        quotient_root: q_tree.root(),
         fri_roots, fri_last,
-        query_positions, trace_opens, fri_opens,
+        query_positions, trace_opens, quotient_opens, fri_opens,
         fri_alphas_count: alphas.len(),
     };
     (proof, perms, ticket)
 }
 
-/// Circle STARK verify (succinct).
-/// Uses circle_eval_at for O(n) per query instead of full O(n log n) LDE.
-/// Trace is public (Fibonacci from a0, a1), so verifier recomputes coefficients.
+/// Circle STARK verify with constraint quotient + FRI fold consistency.
 fn cstark_verify(proof: &CStarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
+    let n = 1usize << proof.log_trace;
     let log_lde = proof.log_trace + LOG_BLOWUP;
     let lde_n = 1usize << log_lde;
 
-    // 1. Recompute trace polynomial coefficients from public inputs
+    // 1. Recompute constraint quotient from public trace
     let trace = circle_fib_trace(proof.log_trace, proof.a0, proof.a1);
     let trace_dom = CDomain::new(proof.log_trace);
     let inv_tw = fri_twiddles(&trace_dom);
     let coeffs = icfft(&trace, &inv_tw);
+    let mut c_vals = vec![0u32; n];
+    for i in 0..n {
+        c_vals[i] = sub(trace[(i + 2) % n], add(trace[(i + 1) % n], trace[i]));
+    }
+    let c_coeffs = icfft(&c_vals, &inv_tw);
+    let lde_dom = CDomain::new(log_lde);
+    let lde_fwd = cfft_fwd_twiddles(&lde_dom);
+    let mut c_padded = vec![0u32; lde_n];
+    c_padded[..n].copy_from_slice(&c_coeffs);
+    let c_lde = cfft(&c_padded, &lde_fwd);
+    let half_n = n / 2;
+    let x_b0 = trace_dom.half[half_n - 2].x;
+    let x_b1 = trace_dom.half[half_n - 1].x;
+    let mut q_evals = Vec::with_capacity(lde_n);
+    for j in 0..lde_n {
+        let pt = lde_dom.at(j);
+        let z_val = mul(sub(pt.x, x_b0), sub(pt.x, x_b1));
+        let v_val = vanish_coset(pt.x, proof.log_trace);
+        q_evals.push(mul(mul(c_lde[j], z_val), inv(v_val)));
+    }
 
-    // 2. Re-derive Fiat-Shamir
+    // 2. Re-derive Fiat-Shamir (must match prover)
     let mut fs = [0u32; W];
     fs[..8].copy_from_slice(&proof.trace_root);
-    fs[8] = 0x4652_4931;
+    fs[8..16].copy_from_slice(&proof.quotient_root);
+    fs[16] = 0x4652_4931;
     poseidon2(&mut fs, rc);
     let mut rng = Rng(fs[0] as u64 | ((fs[1] as u64) << 32) | 1);
-    let _alpha0 = rng.next() as u32 & P;
-    let mut alphas_count = 1usize;
+    let alpha0 = rng.next() as u32 & P;
+    let mut alphas = vec![alpha0];
     for root in &proof.fri_roots {
         let mut fs2 = [0u32; W];
         fs2[..8].copy_from_slice(root);
         fs2[8] = 0x4652_4932;
         poseidon2(&mut fs2, rc);
-        let _ = fs2[0] & P;
-        alphas_count += 1;
+        alphas.push(fs2[0] & P);
     }
-    if alphas_count != proof.fri_alphas_count { return false; }
+    if alphas.len() != proof.fri_alphas_count { return false; }
 
-    // 3. Verify queries: Merkle openings + polynomial consistency
-    let lde_dom = CDomain::new(log_lde);
+    // 3. Recompute FRI fold chain on quotient
+    let lde_inv_tw = fri_twiddles(&lde_dom);
+    let mut fri_layers: Vec<Vec<u32>> = Vec::new();
+    let mut cur = fri_fold_circle(&q_evals, alpha0, &lde_inv_tw[0]);
+    fri_layers.push(cur.clone());
+    let mut tw_idx = 1;
+    for ai in 1..alphas.len() {
+        if cur.len() <= FRI_FOLD_STOP { break; }
+        cur = fri_fold_line(&cur, alphas[ai], &lde_inv_tw[tw_idx]);
+        tw_idx += 1;
+        fri_layers.push(cur.clone());
+    }
+
+    // 4. Verify queries
     for qi in 0..CSTARK_QUERIES {
         let pos = (rng.next() as usize) % lde_n;
         if proof.query_positions[qi] != pos { return false; }
 
-        // Trace Merkle opening
+        // 4a. Trace Merkle opening + polynomial consistency
         let to = &proof.trace_opens[qi];
         if !MerkleTree::verify_path(to.leaf, to.idx, &to.path, proof.trace_root, h_h, rc) {
             return false;
         }
-
-        // Committed value must match trace polynomial at this LDE point
         let pt = lde_dom.at(pos);
-        let expected = circle_eval_at(&coeffs, pt);
-        if to.leaf[pos % 8] != expected { return false; }
+        let expected_t = circle_eval_at(&coeffs, pt);
+        if to.leaf[pos % 8] != expected_t { return false; }
 
-        // FRI layer Merkle openings
+        // 4b. Quotient Merkle opening + constraint quotient consistency
+        let qo = &proof.quotient_opens[qi];
+        if !MerkleTree::verify_path(qo.leaf, qo.idx, &qo.path, proof.quotient_root, h_h, rc) {
+            return false;
+        }
+        if qo.leaf[pos % 8] != q_evals[pos] { return false; }
+
+        // 4c. FRI fold consistency
         for (li, fri_root) in proof.fri_roots.iter().enumerate() {
             let lo = &proof.fri_opens[qi][li];
             if !MerkleTree::verify_path(lo.leaf, lo.idx, &lo.path, *fri_root, h_h, rc) {
                 return false;
             }
+            let layer_size = lde_n >> (li + 1);
+            let fp = pos % layer_size;
+            if lo.leaf[fp % 8] != fri_layers[li][fp] { return false; }
         }
     }
-
-    // 4. Boundary: trace polynomial encodes a0 at trace_dom[0] and a1 at trace_dom[1]
-    // (Already verified implicitly: coeffs come from iCFFT of the public Fibonacci trace)
 
     // 5. FRI last layer: all values equal (degree-0)
     if !proof.fri_last.is_empty() {
@@ -581,9 +649,10 @@ fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
                 ticket_state: &[u32; W], ticket_slot: usize) -> Vec<u32> {
     let mut b = Vec::new();
     b.push(0x4353_544B); // magic "CSTK"
-    b.push(1);            // version
+    b.push(2);            // version 2 (with quotient)
     b.push(proof.a0); b.push(proof.a1); b.push(proof.log_trace);
     b.extend_from_slice(&proof.trace_root);
+    b.extend_from_slice(&proof.quotient_root);
     b.push(proof.fri_roots.len() as u32);
     for r in &proof.fri_roots { b.extend_from_slice(r); }
     b.push(proof.fri_last.len() as u32);
@@ -593,6 +662,7 @@ fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
     for qi in 0..proof.query_positions.len() {
         b.push(proof.query_positions[qi] as u32);
         encode_leaf(&mut b, &proof.trace_opens[qi]);
+        encode_leaf(&mut b, &proof.quotient_opens[qi]);
         b.push(proof.fri_opens[qi].len() as u32);
         for lo in &proof.fri_opens[qi] { encode_leaf(&mut b, lo); }
     }
@@ -607,11 +677,12 @@ fn encode_proof(proof: &CStarkProof, h_h: &[u32; 8], target: &[u32; 8],
 fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W], usize)> {
     let mut i = 0;
     if rd(d, &mut i)? != 0x4353_544B { return None; }
-    if rd(d, &mut i)? != 1 { return None; }
+    if rd(d, &mut i)? != 2 { return None; }
     let a0 = rd(d, &mut i)?;
     let a1 = rd(d, &mut i)?;
     let log_trace = rd(d, &mut i)?;
     let trace_root = rd8(d, &mut i)?;
+    let quotient_root = rd8(d, &mut i)?;
     let nf = rd(d, &mut i)? as usize;
     let mut fri_roots = Vec::with_capacity(nf);
     for _ in 0..nf { fri_roots.push(rd8(d, &mut i)?); }
@@ -622,10 +693,12 @@ fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W],
     let nq = rd(d, &mut i)? as usize;
     let mut qp = Vec::with_capacity(nq);
     let mut to = Vec::with_capacity(nq);
+    let mut qo = Vec::with_capacity(nq);
     let mut fo: Vec<Vec<LeafOpen>> = Vec::with_capacity(nq);
     for _ in 0..nq {
         qp.push(rd(d, &mut i)? as usize);
         to.push(decode_leaf(d, &mut i)?);
+        qo.push(decode_leaf(d, &mut i)?);
         let layers = rd(d, &mut i)? as usize;
         let mut ls = Vec::with_capacity(layers);
         for _ in 0..layers { ls.push(decode_leaf(d, &mut i)?); }
@@ -637,8 +710,8 @@ fn decode_proof(d: &[u32]) -> Option<(CStarkProof, [u32; 8], [u32; 8], [u32; W],
     if i + W > d.len() { return None; }
     let mut ts = [0u32; W]; ts.copy_from_slice(&d[i..i+W]);
     Some((CStarkProof {
-        a0, a1, log_trace, trace_root, fri_roots, fri_last,
-        query_positions: qp, trace_opens: to, fri_opens: fo, fri_alphas_count,
+        a0, a1, log_trace, quotient_root, trace_root, fri_roots, fri_last,
+        query_positions: qp, trace_opens: to, quotient_opens: qo, fri_opens: fo, fri_alphas_count,
     }, h_h, target, ts, slot))
 }
 
@@ -1296,6 +1369,9 @@ fn stark_worker(
                 println!("Domain      : Circle C(M31), |C|=2^31");
                 print!("Trace root  : ");
                 for v in &proof.trace_root { print!("{:08x}", v); }
+                println!();
+                print!("Quotient root: ");
+                for v in &proof.quotient_root { print!("{:08x}", v); }
                 println!();
                 println!("FRI layers  : {}", proof.fri_roots.len());
                 for (k, r) in proof.fri_roots.iter().enumerate() {
