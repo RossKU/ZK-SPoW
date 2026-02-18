@@ -297,28 +297,6 @@ fn cfft(coeffs: &[u32], fwd_twid: &[Vec<u32>]) -> Vec<u32> {
     r
 }
 
-/// Evaluate line polynomial at a single x-value (direct, O(n)).
-fn line_eval_at(coeffs: &[u32], x: u32) -> u32 {
-    if coeffs.len() == 1 { return coeffs[0]; }
-    let half = coeffs.len() / 2;
-    let mut ec = Vec::with_capacity(half);
-    let mut oc = Vec::with_capacity(half);
-    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
-    let nx = CirclePoint::double_x(x);
-    add(line_eval_at(&ec, nx), mul(x, line_eval_at(&oc, nx)))
-}
-
-/// Evaluate circle polynomial at a single point (direct, O(n)).
-fn circle_eval_at(coeffs: &[u32], p: CirclePoint) -> u32 {
-    let n = coeffs.len();
-    if n == 1 { return coeffs[0]; }
-    let half = n / 2;
-    let mut ec = Vec::with_capacity(half);
-    let mut oc = Vec::with_capacity(half);
-    for i in 0..half { ec.push(coeffs[2 * i]); oc.push(coeffs[2 * i + 1]); }
-    add(line_eval_at(&ec, p.x), mul(p.y, line_eval_at(&oc, p.x)))
-}
-
 // ── Circle STARK prover & verifier ────────────────────────
 
 const LOG_BLOWUP: u32 = 2; // 4x blowup
@@ -586,7 +564,7 @@ fn circle_smoke_test() {
     let lde_fwd = cfft_fwd_twiddles(&lde_dom);
     let mut padded = vec![0u32; lde_n];
     padded[..n].copy_from_slice(&coeffs);
-    let lde_evals = cfft(&padded, &lde_fwd);
+    let _lde_evals = cfft(&padded, &lde_fwd);
     // Verify: vanish_coset(trace domain) != 0 on all LDE points
     for i in 0..lde_n {
         let v = vanish_coset(lde_dom.at(i).x, log_n);
@@ -818,8 +796,9 @@ impl MerkleTree {
     }
 }
 
-// ── Polynomial operations ───────────────────────────────────
+// ── Legacy polynomial STARK (kept for reference) ────────────
 
+#[allow(dead_code)]
 fn precompute_inv_table(max: usize) -> Vec<u32> {
     let mut tab = vec![0u32; max + 1];
     if max >= 1 { tab[1] = 1; }
@@ -830,6 +809,7 @@ fn precompute_inv_table(max: usize) -> Vec<u32> {
     tab
 }
 
+#[allow(dead_code)]
 fn barycentric_weights(n: usize) -> Vec<u32> {
     let mut fact = vec![1u32; n];
     for i in 1..n { fact[i] = mul(fact[i - 1], i as u32); }
@@ -845,6 +825,7 @@ fn barycentric_weights(n: usize) -> Vec<u32> {
 }
 
 /// Evaluate trace polynomial on LDE domain via barycentric Lagrange.
+#[allow(dead_code)]
 fn compute_lde(trace: &[u32], weights: &[u32], inv_tab: &[u32], dom: usize) -> Vec<u32> {
     let n = trace.len();
     let mut evals = Vec::with_capacity(dom);
@@ -871,6 +852,7 @@ fn compute_lde(trace: &[u32], weights: &[u32], inv_tab: &[u32], dom: usize) -> V
 }
 
 /// Compute constraint quotient Q(x) = (T(x+2)-T(x+1)-T(x)) / Z(x).
+#[allow(dead_code)]
 fn compute_quotient(t_evals: &[u32], n: usize, inv_tab: &[u32]) -> Vec<u32> {
     let dom = t_evals.len();
     let mut q_evals = vec![0u32; dom];
@@ -909,6 +891,7 @@ fn compute_quotient(t_evals: &[u32], n: usize, inv_tab: &[u32]) -> Vec<u32> {
 }
 
 /// Evaluate vanishing polynomial Z(x) = ∏_{i=0}^{n-3}(x-i) at a single point.
+#[allow(dead_code)]
 fn vanishing_eval(x: u32, n: usize) -> u32 {
     let mut z = 1u32;
     for i in 0..(n as u32 - 2) { z = mul(z, sub(x, i)); }
@@ -917,9 +900,12 @@ fn vanishing_eval(x: u32, n: usize) -> u32 {
 
 // ── STARK structures ────────────────────────────────────────
 
+#[allow(dead_code)]
 const BLOWUP: usize = 4;
+#[allow(dead_code)]
 const N_QUERIES: usize = 32;
 
+#[allow(dead_code)]
 struct StarkQuery {
     x: usize,
     t_lo: LeafOpen,  // trace leaf at x/8
@@ -927,6 +913,7 @@ struct StarkQuery {
     q: LeafOpen,     // quotient leaf at x/8
 }
 
+#[allow(dead_code)]
 struct StarkProof {
     a0: u32,
     a1: u32,
@@ -939,6 +926,7 @@ struct StarkProof {
 
 // ── STARK prover ────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn fib_trace(n: usize, a0: u32, a1: u32) -> Vec<u32> {
     let mut t = vec![0u32; n];
     t[0] = a0; t[1] = a1;
@@ -946,6 +934,7 @@ fn fib_trace(n: usize, a0: u32, a1: u32) -> Vec<u32> {
     t
 }
 
+#[allow(dead_code)]
 fn stark_prove(
     trace: &[u32], h_h: &[u32; 8], rc: &RC, target: &[u32; 8],
     weights: &[u32], inv_tab: &[u32],
@@ -1004,6 +993,7 @@ fn stark_prove(
 
 // ── STARK verifier ──────────────────────────────────────────
 
+#[allow(dead_code)]
 fn stark_verify(proof: &StarkProof, h_h: &[u32; 8], rc: &RC) -> bool {
     let n = proof.trace_len;
     let dom = n * BLOWUP;
