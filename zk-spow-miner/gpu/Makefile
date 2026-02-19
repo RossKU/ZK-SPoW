@@ -1,26 +1,40 @@
-# ZK-SPoW GPU Benchmark
+# ZK-SPoW GPU Benchmarks
 # Requires: NVIDIA GPU + CUDA toolkit (nvcc)
 #
-# Usage:
-#   make              # build for sm_80 (Ampere, e.g. A100/RTX 3090)
-#   make ARCH=sm_89   # build for Ada Lovelace (RTX 4090)
-#   make ARCH=sm_90   # build for Hopper (H100)
-#   make run           # build and run with defaults
-#   make run ARGS="24 22 10"  # difficulty=24, array=2^22, 10sec/phase
+# Targets:
+#   make bench          # Poseidon2 throughput benchmark (Pure PoW vs Merkle vs Symbiotic)
+#   make stark          # Full GPU STARK prover + symbiotic benchmark
+#   make all            # build both
+#
+# Options:
+#   ARCH=sm_89          # Ada Lovelace (RTX 4070/4090)
+#   ARCH=sm_80          # Ampere (A100/RTX 3090) [default]
+#   ARCH=sm_90          # Hopper (H100)
+#
+# Run:
+#   ./bench [difficulty] [log_array_size] [seconds]
+#   ./stark [log_trace] [difficulty] [seconds]
 
 NVCC ?= nvcc
 ARCH ?= sm_80
-ARGS ?= 24 22 5
 
 NVFLAGS = -O3 -arch=$(ARCH) --std=c++17
+
+all: bench stark
 
 bench: bench.cu
 	$(NVCC) $(NVFLAGS) -o $@ $<
 
-run: bench
-	./bench $(ARGS)
+stark: stark.cu
+	$(NVCC) $(NVFLAGS) -o $@ $<
+
+run-bench: bench
+	./bench 24 22 5
+
+run-stark: stark
+	./stark 16 24 5
 
 clean:
-	rm -f bench
+	rm -f bench stark
 
-.PHONY: run clean
+.PHONY: all run-bench run-stark clean
