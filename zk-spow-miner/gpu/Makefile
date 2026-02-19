@@ -14,6 +14,7 @@
 # Run:
 #   ./bench [difficulty] [log_array_size] [seconds]
 #   ./stark [log_trace] [difficulty] [seconds]
+#   ./stark sweep [difficulty] [seconds]
 
 NVCC ?= nvcc
 ARCH ?= sm_80
@@ -34,7 +35,10 @@ run-bench: bench
 run-stark: stark
 	./stark 16 24 5
 
+run-sweep: stark
+	./stark sweep 24 3
+
 clean:
 	rm -f bench stark
 
-.PHONY: all run-bench run-stark clean
+.PHONY: all run-bench run-stark run-sweep clean

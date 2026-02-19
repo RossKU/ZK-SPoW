@@ -9,7 +9,9 @@
 //
 // Build:  nvcc -O3 -arch=sm_80 stark.cu -o stark
 // Run:    ./stark [log_trace] [difficulty] [seconds]
+// Sweep:  ./stark sweep [difficulty] [seconds]
 // Example: ./stark 16 24 10
+// Example: ./stark sweep 24 3
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1253,10 +1255,151 @@ const char* fmt(uint64_t n, char* buf) {
     return buf;
 }
 
+// ── 3-Mode measurement result ──
+struct SweepResult {
+    int log_trace;
+    double stark_ms;
+    uint64_t stark_perms;
+    int stark_count;
+    double mode_a, mode_b, mode_c;  // perm/s
+    double zk_overhead, sym_recovery, net_cost;  // percent
+    double f_sym, spread;
+};
+
+// Run 3-mode comparison for a given trace size.
+// Prints per-phase detail if verbose.
+SweepResult run_3mode(int log_trace, int difficulty, double run_sec,
+                      const RC* rc, int sms, bool verbose)
+{
+    char buf[32];
+    cudaStream_t s_stark, s_pow;
+    CHECK(cudaStreamCreate(&s_stark));
+    CHECK(cudaStreamCreate(&s_pow));
+
+    int pow_threads = 256;
+    int lde_n = 1 << (log_trace + LOG_BLOWUP);
+    int pow_batch = lde_n;
+    int pow_batch_blocks = div_up(pow_batch, pow_threads);
+
+    // PoW counters
+    int *d_pow_found, *d_pow_slot;
+    uint32_t *d_pow_state;
+    CHECK(cudaMalloc(&d_pow_found, sizeof(int)));
+    CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
+    CHECK(cudaMalloc(&d_pow_state, W * sizeof(uint32_t)));
+
+    // Phase 1: STARK timing (1 warm-up + 1 measured)
+    gpu_stark_prove(log_trace, 1, 1, rc, s_stark);  // warm up
+    StarkTiming st = gpu_stark_prove(log_trace, 100, 1, rc, s_stark);
+
+    // Pre-allocate STARK buffers
+    StarkBufs sbufs = stark_bufs_alloc(log_trace, rc);
+    stark_prove_fast(&sbufs, 1, 1, s_stark);  // warm up
+
+    // Helper: batched Pure PoW measurement
+    auto run_pure_pow = [&]() -> double {
+        CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
+        k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
+            0, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
+        CHECK(cudaStreamSynchronize(s_pow));
+
+        uint64_t total_perms = 0, nonce = 0;
+        int launches = 0;
+        double t0 = wall_time();
+        while (wall_time() - t0 < run_sec) {
+            k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
+                nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
+            nonce += pow_batch;
+            total_perms += pow_batch;
+            launches++;
+            if (launches % 50 == 0) CHECK(cudaStreamSynchronize(s_pow));
+        }
+        CHECK(cudaStreamSynchronize(s_pow));
+        return total_perms / (wall_time() - t0);
+    };
+
+    // Phase 2: Pure PoW (pre)
+    if (verbose) printf("\n  [2^%d] Phase 2: Pure PoW (pre)...", log_trace);
+    double pre = run_pure_pow();
+    if (verbose) printf(" %.2f Mperm/s\n", pre / 1e6);
+
+    // Phase 3: Symbiotic
+    if (verbose) printf("  [2^%d] Phase 3: Symbiotic...", log_trace);
+    CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
+
+    double tw0 = wall_time();
+    uint64_t stark_perms_total = 0, sym_pow_perms = 0;
+    int stark_count = 0, pow_launches = 0;
+    uint64_t pow_nonce = 0;
+
+    while (wall_time() - tw0 < run_sec) {
+        uint64_t p = stark_prove_fast(&sbufs, 200 + stark_count, 1, s_stark);
+        stark_perms_total += p;
+        stark_count++;
+        for (int b = 0; b < 5; b++) {
+            k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
+                pow_nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
+            pow_nonce += pow_batch;
+            sym_pow_perms += pow_batch;
+            pow_launches++;
+        }
+    }
+    CHECK(cudaStreamSynchronize(s_pow));
+    CHECK(cudaStreamSynchronize(s_stark));
+    double sym_elapsed = wall_time() - tw0;
+
+    double pow_only_rate = sym_pow_perms / sym_elapsed;
+    double sym_rate = (sym_pow_perms + stark_perms_total) / sym_elapsed;
+    double f_sym = (double)stark_perms_total / (sym_pow_perms + stark_perms_total);
+    if (verbose) printf(" %.2f Mperm/s (%d proofs)\n", sym_rate / 1e6, stark_count);
+
+    // Phase 4: Pure PoW (post)
+    if (verbose) printf("  [2^%d] Phase 4: Pure PoW (post)...", log_trace);
+    double post = run_pure_pow();
+    if (verbose) printf(" %.2f Mperm/s\n", post / 1e6);
+
+    // Cleanup
+    cudaFree(d_pow_found); cudaFree(d_pow_slot); cudaFree(d_pow_state);
+    stark_bufs_free(&sbufs);
+    CHECK(cudaStreamDestroy(s_stark));
+    CHECK(cudaStreamDestroy(s_pow));
+
+    // Compute result
+    double pure_avg = (pre + post) / 2.0;
+    double spread = fabs(pre - post) / pure_avg * 100;
+
+    SweepResult r = {};
+    r.log_trace = log_trace;
+    r.stark_ms = st.t_total * 1e3;
+    r.stark_perms = st.poseidon_perms;
+    r.stark_count = stark_count;
+    r.mode_a = pure_avg;
+    r.mode_b = pow_only_rate;
+    r.mode_c = sym_rate;
+    r.zk_overhead = (1.0 - r.mode_b / r.mode_a) * 100;
+    r.sym_recovery = (r.mode_c / r.mode_b - 1.0) * 100;
+    r.net_cost = (1.0 - r.mode_c / r.mode_a) * 100;
+    r.f_sym = f_sym * 100;
+    r.spread = spread;
+    return r;
+}
+
 int main(int argc, char** argv) {
-    int log_trace = argc > 1 ? atoi(argv[1]) : 16;
-    int difficulty = argc > 2 ? atoi(argv[2]) : 24;
-    double run_sec = argc > 3 ? atof(argv[3]) : 5.0;
+    // Detect sweep mode: ./stark sweep [difficulty] [seconds]
+    bool sweep_mode = argc > 1 && strcmp(argv[1], "sweep") == 0;
+
+    int log_trace = 16;
+    int difficulty = 24;
+    double run_sec = 5.0;
+
+    if (sweep_mode) {
+        difficulty = argc > 2 ? atoi(argv[2]) : 24;
+        run_sec = argc > 3 ? atof(argv[3]) : 3.0;
+    } else {
+        log_trace = argc > 1 ? atoi(argv[1]) : 16;
+        difficulty = argc > 2 ? atoi(argv[2]) : 24;
+        run_sec = argc > 3 ? atof(argv[3]) : 5.0;
+    }
 
     cudaDeviceProp prop;
     CHECK(cudaGetDeviceProperties(&prop, 0));
@@ -1268,12 +1411,17 @@ int main(int argc, char** argv) {
     printf("Memory       : %.1f GB, L2 %.1f MB\n",
         prop.totalGlobalMem/1e9, prop.l2CacheSize/1e6);
     printf("────────────────────────────────────────────────────\n");
-    printf("Trace        : 2^%d = %d\n", log_trace, 1 << log_trace);
-    printf("LDE          : 2^%d = %d (%dx blowup)\n",
-        log_trace + LOG_BLOWUP, 1 << (log_trace + LOG_BLOWUP), 1 << LOG_BLOWUP);
+    if (sweep_mode) {
+        printf("Mode         : SWEEP (k=8,10,12,...,22)\n");
+    } else {
+        printf("Trace        : 2^%d = %d\n", log_trace, 1 << log_trace);
+        printf("LDE          : 2^%d = %d (%dx blowup)\n",
+            log_trace + LOG_BLOWUP, 1 << (log_trace + LOG_BLOWUP), 1 << LOG_BLOWUP);
+    }
     printf("Difficulty   : %d bits\n", difficulty);
     printf("FRI queries  : %d, fold to <= %d\n", N_QUERIES, FRI_STOP);
     printf("Poseidon2    : W=%d, Rf=%d, Rp=%d\n", W, RF, RP);
+    printf("Run time     : %.1f sec/size\n", run_sec);
     printf("════════════════════════════════════════════════════\n");
 
     // Setup constants
@@ -1289,251 +1437,147 @@ int main(int argc, char** argv) {
     CHECK(cudaMemcpyToSymbol(d_target, target, sizeof(target)));
 
     char buf[32];
-    cudaStream_t s_stark, s_pow;
-    CHECK(cudaStreamCreate(&s_stark));
-    CHECK(cudaStreamCreate(&s_pow));
 
-    // ── Phase 1: Full STARK proof timing ──
-    printf("\n── Phase 1: Full GPU STARK Proof ───────────────\n");
+    if (sweep_mode) {
+        // ═══════════════════════════════════════════════════════════
+        // Sweep mode: run 3-mode comparison across multiple trace sizes
+        // ═══════════════════════════════════════════════════════════
+        const int sizes[] = {8, 10, 12, 14, 16, 18, 20, 22};
+        const int n_sizes = sizeof(sizes) / sizeof(sizes[0]);
+        SweepResult results[n_sizes];
 
-    // Warm up
-    gpu_stark_prove(log_trace, 1, 1, &rc, s_stark);
-
-    // Actual measurement (average of 3 runs)
-    StarkTiming avg = {};
-    int runs = 3;
-    for (int r = 0; r < runs; r++) {
-        StarkTiming t = gpu_stark_prove(log_trace, 100 + r, 1, &rc, s_stark);
-        avg.t_icfft += t.t_icfft;
-        avg.t_cfft += t.t_cfft;
-        avg.t_merkle_trace += t.t_merkle_trace;
-        avg.t_quotient += t.t_quotient;
-        avg.t_merkle_quot += t.t_merkle_quot;
-        avg.t_fri += t.t_fri;
-        avg.t_total += t.t_total;
-        avg.poseidon_perms += t.poseidon_perms;
-    }
-    avg.t_icfft /= runs; avg.t_cfft /= runs;
-    avg.t_merkle_trace /= runs; avg.t_quotient /= runs;
-    avg.t_merkle_quot /= runs; avg.t_fri /= runs;
-    avg.t_total /= runs; avg.poseidon_perms /= runs;
-
-    printf("Component breakdown (avg of %d runs):\n", runs);
-    printf("  iCFFT        : %8.3f ms\n", avg.t_icfft * 1e3);
-    printf("  CFFT (LDE)   : %8.3f ms\n", avg.t_cfft * 1e3);
-    printf("  Merkle trace : %8.3f ms  (Poseidon2)\n", avg.t_merkle_trace * 1e3);
-    printf("  Quotient     : %8.3f ms\n", avg.t_quotient * 1e3);
-    printf("  Merkle quot  : %8.3f ms  (Poseidon2)\n", avg.t_merkle_quot * 1e3);
-    printf("  FRI fold     : %8.3f ms\n", avg.t_fri * 1e3);
-    printf("  ─────────────────────────\n");
-    printf("  Total        : %8.3f ms\n", avg.t_total * 1e3);
-    printf("  Poseidon2    : %s perms\n", fmt(avg.poseidon_perms, buf));
-
-    double stark_pps = avg.poseidon_perms / avg.t_total;
-    printf("  STARK Mperm/s: %.2f\n", stark_pps / 1e6);
-
-    // Time breakdown: Poseidon2 (Merkle) vs M31-only (FFT/quotient/FRI)
-    double t_poseidon = avg.t_merkle_trace + avg.t_merkle_quot;
-    double t_memory = avg.t_icfft + avg.t_cfft + avg.t_quotient;
-    printf("\n  Poseidon2 time: %.1f%% (Merkle trace+quot)\n", t_poseidon / avg.t_total * 100);
-    printf("  FRI time       : %.1f%% (Merkle commits + folds)\n", avg.t_fri / avg.t_total * 100);
-    printf("  M31/memory time: %.1f%% (FFT + quotient)\n", t_memory / avg.t_total * 100);
-
-    // ═══════════════════════════════════════════════════════════════
-    // Phases 2–4: Hashrate Invariance Test (§4.4)
-    //
-    // Paper's claim: "Total PoW hashrate H is independent of operating mode."
-    //   ASIC model: single pipeline, per-cycle MUX (STARK/PoW) → H = constant
-    //   GPU test:   concurrent CUDA streams → H_sym ≈ H_pure?
-    //
-    // Each Poseidon2 perm produces 3 PoW tickets regardless of input source.
-    // "Ticket rate" = total perms/sec (PoW nonce + STARK Merkle combined).
-    // ═══════════════════════════════════════════════════════════════
-
-    int pow_threads = 256;
-
-    // Pre-allocate STARK buffers (shared across phases)
-    StarkBufs sbufs = stark_bufs_alloc(log_trace, &rc);
-    stark_prove_fast(&sbufs, 1, 1, s_stark);  // warm up
-
-    // ── Batched PoW: same launch pattern as STARK Merkle ──
-    // One thread = one Poseidon2 perm, then exit.
-    // Batch size = LDE domain size (matches STARK kernel scale).
-    int lde_n_bench = 1 << (log_trace + LOG_BLOWUP);
-    int pow_batch = lde_n_bench;
-    int pow_batch_blocks = div_up(pow_batch, pow_threads);
-
-    // Pre-allocate PoW counters (reused across phases)
-    int *d_pow_found, *d_pow_slot;
-    uint32_t *d_pow_state;
-    CHECK(cudaMalloc(&d_pow_found, sizeof(int)));
-    CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
-    CHECK(cudaMalloc(&d_pow_state, W * sizeof(uint32_t)));
-
-    // ── Helper: batched Pure PoW measurement ──
-    auto run_pure_pow = [&](const char* label) -> double {
-        CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
-
-        // Warm up (1 batch)
-        k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
-            0, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
-        CHECK(cudaStreamSynchronize(s_pow));
-
-        uint64_t total_perms = 0;
-        uint64_t nonce = 0;
-        int launches = 0;
-        double t0 = wall_time();
-        while (wall_time() - t0 < run_sec) {
-            k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
-                nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
-            nonce += pow_batch;
-            total_perms += pow_batch;
-            launches++;
-            // Sync every 50 launches to pace host (matches STARK's ~1 sync/proof)
-            if (launches % 50 == 0) CHECK(cudaStreamSynchronize(s_pow));
+        for (int i = 0; i < n_sizes; i++) {
+            int k = sizes[i];
+            printf("\n════ Sweep k=%d (2^%d = %d) ════════════════════\n",
+                k, k, 1 << k);
+            results[i] = run_3mode(k, difficulty, run_sec, &rc, sms, true);
+            SweepResult& r = results[i];
+            printf("  → A=%.1f  B=%.1f  C=%.1f Mperm/s  ZK=%+.1f%%  Sym=%+.1f%%  Net=%+.1f%%\n",
+                r.mode_a / 1e6, r.mode_b / 1e6, r.mode_c / 1e6,
+                -r.zk_overhead, r.sym_recovery, -r.net_cost);
         }
-        CHECK(cudaStreamSynchronize(s_pow));
-        double elapsed = wall_time() - t0;
-        double rate = total_perms / elapsed;
 
-        printf("\n── %s (%.1fs) ──────────────────────\n", label, run_sec);
-        printf("  Batch  : %d perms/launch, %d blocks\n", pow_batch, pow_batch_blocks);
-        printf("  Launches: %d\n", launches);
-        printf("  Perms  : %s\n", fmt(total_perms, buf));
-        printf("  Rate   : %.2f Mperm/s  (%.2f Mticket/s)\n", rate / 1e6, rate * 3 / 1e6);
-
-        return rate;
-    };
-
-    // ── Phase 2: Pure PoW (before Symbiotic) ──
-    double pure_pow_rate_pre = run_pure_pow("Phase 2: Pure PoW (pre)");
-
-    // ── Phase 3: Symbiotic (§4.1 — STARK Merkle + PoW concurrent) ──
-    printf("\n── Phase 3: Symbiotic (%.1fs) ──────────────────\n", run_sec);
-    printf("  PoW    : batched %d perms/launch (stream s_pow)\n", pow_batch);
-    printf("  STARK  : pre-allocated (stream s_stark)\n");
-
-    CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
-
-    // Both streams run concurrently:
-    //   s_pow:   batched PoW launches (non-persistent)
-    //   s_stark: STARK proofs (pre-allocated)
-    double tw0 = wall_time();
-    uint64_t stark_perms_total = 0;
-    uint64_t sym_pow_perms = 0;
-    int stark_count = 0;
-    int pow_launches = 0;
-    uint64_t pow_nonce = 0;
-
-    while (wall_time() - tw0 < run_sec) {
-        // Interleave: launch PoW batches on s_pow, STARK proofs on s_stark
-        // Launch a few PoW batches per STARK proof (approximate ASIC per-cycle MUX)
-        uint64_t p = stark_prove_fast(&sbufs, 200 + stark_count, 1, s_stark);
-        stark_perms_total += p;
-        stark_count++;
-
-        // While STARK was running, also launch PoW batches on s_pow
-        for (int b = 0; b < 5; b++) {
-            k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
-                pow_nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
-            pow_nonce += pow_batch;
-            sym_pow_perms += pow_batch;
-            pow_launches++;
+        // Summary table
+        printf("\n\n════════════════════════════════════════════════════════════════════════════\n");
+        printf("ZK-SPoW Sweep Summary — 3-Mode Comparison\n");
+        printf("════════════════════════════════════════════════════════════════════════════\n");
+        printf("  k   trace   STARK     perms   A(Pure)   B(ZK+PoW)   C(ZK-SPoW)  ZK cost  Sym rec  Net cost  f_sym\n");
+        printf("────────────────────────────────────────────────────────────────────────────────────────────────────────\n");
+        for (int i = 0; i < n_sizes; i++) {
+            SweepResult& r = results[i];
+            printf(" %2d  %6d  %6.2fms  %6s  %7.1f   %7.1f     %7.1f    %+5.1f%%   %+5.1f%%   %+5.1f%%   %4.1f%%\n",
+                r.log_trace, 1 << r.log_trace,
+                r.stark_ms, fmt(r.stark_perms, buf),
+                r.mode_a / 1e6, r.mode_b / 1e6, r.mode_c / 1e6,
+                -r.zk_overhead, r.sym_recovery, -r.net_cost, r.f_sym);
         }
+        printf("════════════════════════════════════════════════════════════════════════════\n");
+        printf("  A = Pure PoW (Mperm/s)     B = ZK + PoW, no sym (Mperm/s)\n");
+        printf("  C = ZK-SPoW, sym (Mperm/s) ZK cost = A→B   Sym rec = B→C   Net = A→C\n");
+        printf("════════════════════════════════════════════════════════════════════════════\n");
+
+        // Check if Sym recovery is positive across all sizes
+        bool all_positive = true;
+        for (int i = 0; i < n_sizes; i++)
+            if (results[i].sym_recovery <= 0) all_positive = false;
+        if (all_positive)
+            printf("RESULT: Symbiotic recovery positive at ALL sizes — ZK-SPoW universally beneficial\n");
+        else
+            printf("RESULT: Symbiotic recovery NOT universally positive — check small sizes\n");
+
+    } else {
+        // ═══════════════════════════════════════════════════════════
+        // Single mode: detailed Phase 1 timing + 3-mode comparison
+        // ═══════════════════════════════════════════════════════════
+        cudaStream_t s_stark;
+        CHECK(cudaStreamCreate(&s_stark));
+
+        // ── Phase 1: Full STARK proof timing ──
+        printf("\n── Phase 1: Full GPU STARK Proof ───────────────\n");
+
+        // Warm up
+        gpu_stark_prove(log_trace, 1, 1, &rc, s_stark);
+
+        // Actual measurement (average of 3 runs)
+        StarkTiming avg = {};
+        int runs = 3;
+        for (int r = 0; r < runs; r++) {
+            StarkTiming t = gpu_stark_prove(log_trace, 100 + r, 1, &rc, s_stark);
+            avg.t_icfft += t.t_icfft;
+            avg.t_cfft += t.t_cfft;
+            avg.t_merkle_trace += t.t_merkle_trace;
+            avg.t_quotient += t.t_quotient;
+            avg.t_merkle_quot += t.t_merkle_quot;
+            avg.t_fri += t.t_fri;
+            avg.t_total += t.t_total;
+            avg.poseidon_perms += t.poseidon_perms;
+        }
+        avg.t_icfft /= runs; avg.t_cfft /= runs;
+        avg.t_merkle_trace /= runs; avg.t_quotient /= runs;
+        avg.t_merkle_quot /= runs; avg.t_fri /= runs;
+        avg.t_total /= runs; avg.poseidon_perms /= runs;
+
+        printf("Component breakdown (avg of %d runs):\n", runs);
+        printf("  iCFFT        : %8.3f ms\n", avg.t_icfft * 1e3);
+        printf("  CFFT (LDE)   : %8.3f ms\n", avg.t_cfft * 1e3);
+        printf("  Merkle trace : %8.3f ms  (Poseidon2)\n", avg.t_merkle_trace * 1e3);
+        printf("  Quotient     : %8.3f ms\n", avg.t_quotient * 1e3);
+        printf("  Merkle quot  : %8.3f ms  (Poseidon2)\n", avg.t_merkle_quot * 1e3);
+        printf("  FRI fold     : %8.3f ms\n", avg.t_fri * 1e3);
+        printf("  ─────────────────────────\n");
+        printf("  Total        : %8.3f ms\n", avg.t_total * 1e3);
+        printf("  Poseidon2    : %s perms\n", fmt(avg.poseidon_perms, buf));
+
+        double stark_pps = avg.poseidon_perms / avg.t_total;
+        printf("  STARK Mperm/s: %.2f\n", stark_pps / 1e6);
+
+        double t_poseidon = avg.t_merkle_trace + avg.t_merkle_quot;
+        double t_memory = avg.t_icfft + avg.t_cfft + avg.t_quotient;
+        printf("\n  Poseidon2 time: %.1f%% (Merkle trace+quot)\n", t_poseidon / avg.t_total * 100);
+        printf("  FRI time       : %.1f%% (Merkle commits + folds)\n", avg.t_fri / avg.t_total * 100);
+        printf("  M31/memory time: %.1f%% (FFT + quotient)\n", t_memory / avg.t_total * 100);
+
+        // ── Phases 2–4: 3-Mode Comparison ──
+        SweepResult sr = run_3mode(log_trace, difficulty, run_sec, &rc, sms, true);
+
+        // Summary
+        printf("\n════════════════════════════════════════════════════\n");
+        printf("ZK-SPoW 3-Mode Comparison (trace=2^%d)\n", log_trace);
+        printf("════════════════════════════════════════════════════\n");
+        printf("STARK proof      : %6.2f ms/proof  (%s Poseidon2 perms)\n",
+            avg.t_total * 1e3, fmt(avg.poseidon_perms, buf));
+        printf("  Merkle t+q     : %5.1f%%\n", t_poseidon / avg.t_total * 100);
+        printf("  FRI (Mk+fold)  : %5.1f%%\n", avg.t_fri / avg.t_total * 100);
+        printf("  FFT+quotient   : %5.1f%%\n", t_memory / avg.t_total * 100);
+        printf("────────────────────────────────────────────────────\n");
+        printf("A. Pure PoW        : %8.2f Mperm/s  (100.0%%)\n", sr.mode_a / 1e6);
+        printf("   spread          : %.1f%%\n", sr.spread);
+        printf("B. ZK + PoW (no sym): %7.2f Mperm/s  (%5.1f%%)\n",
+            sr.mode_b / 1e6, sr.mode_b / sr.mode_a * 100);
+        printf("C. ZK-SPoW (sym)   : %8.2f Mperm/s  (%5.1f%%)\n",
+            sr.mode_c / 1e6, sr.mode_c / sr.mode_a * 100);
+        printf("────────────────────────────────────────────────────\n");
+        printf("ZK overhead  (A→B): %+.1f%%  (cost of running STARK proofs)\n", -sr.zk_overhead);
+        printf("Sym recovery (B→C): %+.1f%%  (tickets from Merkle hashing)\n", sr.sym_recovery);
+        printf("Net cost     (A→C): %+.1f%%\n", -sr.net_cost);
+        printf("────────────────────────────────────────────────────\n");
+        printf("f_sym              : %.1f%%  (STARK fraction of total perms)\n", sr.f_sym);
+        printf("────────────────────────────────────────────────────\n");
+
+        if (sr.net_cost <= 5.0)
+            printf("RESULT: ZK nearly free (net cost %.1f%%)\n", sr.net_cost);
+        else if (sr.sym_recovery > 1.0)
+            printf("RESULT: Symbiotic recovers %+.1f%% — ZK-SPoW reduces ZK cost\n", sr.sym_recovery);
+        else
+            printf("RESULT: Symbiotic gain minimal (%.1f%%) — bottleneck not complementary\n", sr.sym_recovery);
+
+        if (sr.spread > 10.0)
+            printf("WARNING: Baseline unstable (%.1f%% spread) — results unreliable\n", sr.spread);
+
+        printf("════════════════════════════════════════════════════\n");
+
+        CHECK(cudaStreamDestroy(s_stark));
     }
-    CHECK(cudaStreamSynchronize(s_pow));
-    CHECK(cudaStreamSynchronize(s_stark));
-    double sym_elapsed = wall_time() - tw0;
 
-    uint64_t sym_total = sym_pow_perms + stark_perms_total;
-    double sym_rate = sym_total / sym_elapsed;
-    double pow_only_rate = sym_pow_perms / sym_elapsed;
-    double stark_rate = stark_perms_total / sym_elapsed;
-    double f_sym = (double)stark_perms_total / sym_total;
-    double u_avg = f_sym * 16.0 / 24.0;
-
-    printf("  PoW perms  : %s  (%.2f Mperm/s, %d launches)\n",
-        fmt(sym_pow_perms, buf), pow_only_rate / 1e6, pow_launches);
-    printf("  STARK perms: %s  (%.2f Mperm/s, %d proofs)\n",
-        fmt(stark_perms_total, buf), stark_rate / 1e6, stark_count);
-    printf("  Total      : %s  (%.2f Mperm/s, %.2f Mticket/s)\n",
-        fmt(sym_total, buf), sym_rate / 1e6, sym_rate * 3 / 1e6);
-
-    // ── Phase 4: Pure PoW (after Symbiotic — verify baseline stability) ──
-    double pure_pow_rate_post = run_pure_pow("Phase 4: Pure PoW (post)");
-
-    // Cleanup
-    cudaFree(d_pow_found); cudaFree(d_pow_slot); cudaFree(d_pow_state);
-    stark_bufs_free(&sbufs);
-
-    // Baseline = average of pre and post (accounts for thermal drift)
-    double pure_pow_rate = (pure_pow_rate_pre + pure_pow_rate_post) / 2.0;
-    double baseline_spread = fabs(pure_pow_rate_pre - pure_pow_rate_post) / pure_pow_rate * 100;
-
-    // ═══════════════════════════════════════════════════════════════
-    // Summary — 3-Mode Comparison (ZK-SPoW value demonstration)
-    //
-    // A. Pure PoW           — baseline hashrate (no ZK)
-    // B. ZK + PoW (no sym)  — STARK proofs running, but Merkle perms
-    //                         NOT counted as tickets (ZK = pure cost)
-    // C. ZK-SPoW (sym)      — STARK Merkle perms counted as tickets
-    //                         (Symbiotic recovery)
-    //
-    // B is derived from Phase 3's PoW-only rate (same GPU workload
-    // as C, but only PoW batch perms count toward ticket rate).
-    // ═══════════════════════════════════════════════════════════════
-
-    // Mode A = Pure PoW baseline (avg of pre/post)
-    double mode_a = pure_pow_rate;
-    // Mode B = ZK running but Merkle doesn't produce tickets
-    double mode_b = pow_only_rate;
-    // Mode C = ZK-SPoW (Merkle produces tickets)
-    double mode_c = sym_rate;
-
-    double zk_overhead = (1.0 - mode_b / mode_a) * 100;
-    double sym_recovery = (mode_c / mode_b - 1.0) * 100;
-    double net_cost = (1.0 - mode_c / mode_a) * 100;
-
-    printf("\n════════════════════════════════════════════════════\n");
-    printf("ZK-SPoW 3-Mode Comparison (trace=2^%d)\n", log_trace);
-    printf("════════════════════════════════════════════════════\n");
-    printf("STARK proof      : %6.2f ms/proof  (%s Poseidon2 perms)\n",
-        avg.t_total * 1e3, fmt(avg.poseidon_perms, buf));
-    printf("  Merkle t+q     : %5.1f%%\n", t_poseidon / avg.t_total * 100);
-    printf("  FRI (Mk+fold)  : %5.1f%%\n", avg.t_fri / avg.t_total * 100);
-    printf("  FFT+quotient   : %5.1f%%\n", t_memory / avg.t_total * 100);
-    printf("────────────────────────────────────────────────────\n");
-    printf("A. Pure PoW        : %8.2f Mperm/s  (100.0%%)\n", mode_a / 1e6);
-    printf("   pre/post        : %.2f / %.2f  (spread %.1f%%)\n",
-        pure_pow_rate_pre / 1e6, pure_pow_rate_post / 1e6, baseline_spread);
-    printf("B. ZK + PoW (no sym): %7.2f Mperm/s  (%5.1f%%)\n",
-        mode_b / 1e6, mode_b / mode_a * 100);
-    printf("C. ZK-SPoW (sym)   : %8.2f Mperm/s  (%5.1f%%)\n",
-        mode_c / 1e6, mode_c / mode_a * 100);
-    printf("   PoW portion     : %8.2f Mperm/s\n", pow_only_rate / 1e6);
-    printf("   STARK Merkle    : %8.2f Mperm/s  (%d proofs)\n", stark_rate / 1e6, stark_count);
-    printf("────────────────────────────────────────────────────\n");
-    printf("ZK overhead  (A→B): %+.1f%%  (cost of running STARK proofs)\n", -zk_overhead);
-    printf("Sym recovery (B→C): %+.1f%%  (tickets from Merkle hashing)\n", sym_recovery);
-    printf("Net cost     (A→C): %+.1f%%\n", -net_cost);
-    printf("────────────────────────────────────────────────────\n");
-    printf("f_sym              : %.1f%%  (STARK fraction of total perms)\n", f_sym * 100);
-    printf("U_avg              : %.1f%%  (f_sym × 16/24)\n", u_avg * 100);
-    printf("────────────────────────────────────────────────────\n");
-
-    if (net_cost <= 5.0)
-        printf("RESULT: ZK nearly free (net cost %.1f%%)\n", net_cost);
-    else if (sym_recovery > 1.0)
-        printf("RESULT: Symbiotic recovers %+.1f%% — ZK-SPoW reduces ZK cost\n", sym_recovery);
-    else
-        printf("RESULT: Symbiotic gain minimal (%.1f%%) — bottleneck not complementary\n", sym_recovery);
-
-    if (baseline_spread > 10.0)
-        printf("WARNING: Baseline unstable (%.1f%% spread) — results unreliable\n", baseline_spread);
-
-    printf("════════════════════════════════════════════════════\n");
-
-    CHECK(cudaStreamDestroy(s_stark));
-    CHECK(cudaStreamDestroy(s_pow));
     return 0;
 }
