@@ -1271,14 +1271,16 @@ struct SweepResult {
 SweepResult run_3mode(int log_trace, int difficulty, double run_sec,
                       const RC* rc, int sms, bool verbose)
 {
-    char buf[32];
     cudaStream_t s_stark, s_pow;
     CHECK(cudaStreamCreate(&s_stark));
     CHECK(cudaStreamCreate(&s_pow));
 
     int pow_threads = 256;
     int lde_n = 1 << (log_trace + LOG_BLOWUP);
-    int pow_batch = lde_n;
+
+    // Fixed PoW batch size: always saturate the GPU regardless of trace size.
+    // Real miners always launch large batches (2^20+).
+    int pow_batch = (lde_n >= (1 << 20)) ? lde_n : (1 << 20);
     int pow_batch_blocks = div_up(pow_batch, pow_threads);
 
     // PoW counters
@@ -1295,6 +1297,15 @@ SweepResult run_3mode(int log_trace, int difficulty, double run_sec,
     // Pre-allocate STARK buffers
     StarkBufs sbufs = stark_bufs_alloc(log_trace, rc);
     stark_prove_fast(&sbufs, 1, 1, s_stark);  // warm up
+
+    // Estimate how many PoW batches to pre-queue per STARK proof.
+    // Goal: keep s_pow busy while stark_prove_fast blocks the host (~17 SYNCs).
+    // Estimate GPU PoW throughput ~280 Mperm/s (conservative).
+    double est_pow_throughput = 280e6;
+    double est_pow_batch_sec = (double)pow_batch / est_pow_throughput;
+    int batches_per_proof = (int)(st.t_total / est_pow_batch_sec) + 2;
+    if (batches_per_proof < 2) batches_per_proof = 2;
+    if (batches_per_proof > 200) batches_per_proof = 200;
 
     // Helper: batched Pure PoW measurement
     auto run_pure_pow = [&]() -> double {
@@ -1324,25 +1335,29 @@ SweepResult run_3mode(int log_trace, int difficulty, double run_sec,
     if (verbose) printf(" %.2f Mperm/s\n", pre / 1e6);
 
     // Phase 3: Symbiotic
-    if (verbose) printf("  [2^%d] Phase 3: Symbiotic...", log_trace);
+    //   Pre-queue PoW batches BEFORE stark_prove_fast so s_pow stays busy
+    //   while the host is blocked on s_stark's SYNCs.
+    if (verbose) printf("  [2^%d] Phase 3: Symbiotic (pre-queue %d PoW/proof)...",
+                        log_trace, batches_per_proof);
     CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
 
     double tw0 = wall_time();
     uint64_t stark_perms_total = 0, sym_pow_perms = 0;
-    int stark_count = 0, pow_launches = 0;
+    int stark_count = 0;
     uint64_t pow_nonce = 0;
 
     while (wall_time() - tw0 < run_sec) {
-        uint64_t p = stark_prove_fast(&sbufs, 200 + stark_count, 1, s_stark);
-        stark_perms_total += p;
-        stark_count++;
-        for (int b = 0; b < 5; b++) {
+        // Pre-queue PoW: fill s_pow's queue before STARK blocks the host
+        for (int b = 0; b < batches_per_proof; b++) {
             k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
                 pow_nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
             pow_nonce += pow_batch;
             sym_pow_perms += pow_batch;
-            pow_launches++;
         }
+        // STARK proof (blocks host due to Fiat-Shamir SYNCs, but s_pow keeps running)
+        uint64_t p = stark_prove_fast(&sbufs, 200 + stark_count, 1, s_stark);
+        stark_perms_total += p;
+        stark_count++;
     }
     CHECK(cudaStreamSynchronize(s_pow));
     CHECK(cudaStreamSynchronize(s_stark));
