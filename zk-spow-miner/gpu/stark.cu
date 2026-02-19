@@ -460,6 +460,18 @@ __global__ void k_quotient(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// GPU Kernel: Fibonacci constraint from trace (for pre-alloc prover)
+// ═══════════════════════════════════════════════════════════════
+
+__global__ void k_constraint_vals(
+    const uint32_t* __restrict__ trace, uint32_t* __restrict__ out, int n
+) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    out[i] = m31_sub(trace[(i + 2) % n], m31_add(trace[(i + 1) % n], trace[i]));
+}
+
+// ═══════════════════════════════════════════════════════════════
 // GPU Kernel: FRI fold (circle + line, same operation)
 // ═══════════════════════════════════════════════════════════════
 
@@ -800,6 +812,205 @@ StarkTiming gpu_stark_prove(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Pre-allocated STARK prover (Phase 3: no malloc, no sync gaps)
+// ═══════════════════════════════════════════════════════════════
+
+struct StarkBufs {
+    int log_trace, log_lde, n, lde_n;
+
+    CDomain trace_dom, lde_dom;
+    Twiddles trace_inv_tw, lde_fwd_tw, lde_inv_tw;
+
+    uint32_t *d_a, *d_b, *d_c, *d_q;   // each lde_n words
+    uint32_t *d_lde_x;                  // lde_n words (static)
+
+    // Pre-allocated Merkle trees
+    uint32_t *d_tree_t, *d_tree_q;
+    int mk_n_leaves, mk_n_levels, mk_total;
+    int *mk_offsets;  // level offsets in uint32_t count
+
+    // Counters
+    unsigned long long *d_perms;
+    int *d_found, *d_slot;
+    uint32_t *d_state;
+
+    uint32_t *h_trace;
+    uint32_t x_b0, x_b1;
+};
+
+StarkBufs stark_bufs_alloc(int log_trace) {
+    StarkBufs b = {};
+    b.log_trace = log_trace;
+    b.log_lde = log_trace + LOG_BLOWUP;
+    b.n = 1 << log_trace;
+    b.lde_n = 1 << b.log_lde;
+
+    // Domains + twiddles (computed once, uploaded to device)
+    b.trace_dom = cd_new(log_trace);
+    b.lde_dom = cd_new(b.log_lde);
+    b.trace_inv_tw = make_inv_twiddles(&b.trace_dom);
+    b.lde_fwd_tw = make_fwd_twiddles(&b.lde_dom);
+    b.lde_inv_tw = make_inv_twiddles(&b.lde_dom);
+
+    // GPU work buffers
+    int lde_n = b.lde_n;
+    CHECK(cudaMalloc(&b.d_a, lde_n * sizeof(uint32_t)));
+    CHECK(cudaMalloc(&b.d_b, lde_n * sizeof(uint32_t)));
+    CHECK(cudaMalloc(&b.d_c, lde_n * sizeof(uint32_t)));
+    CHECK(cudaMalloc(&b.d_q, lde_n * sizeof(uint32_t)));
+
+    // LDE x-coordinates (static — upload once)
+    CHECK(cudaMalloc(&b.d_lde_x, lde_n * sizeof(uint32_t)));
+    uint32_t* lde_x = (uint32_t*)malloc(lde_n * sizeof(uint32_t));
+    for (int i = 0; i < b.lde_dom.half_n; i++) {
+        lde_x[i] = b.lde_dom.half_x[i];
+        lde_x[i + b.lde_dom.half_n] = b.lde_dom.half_x[i];
+    }
+    CHECK(cudaMemcpy(b.d_lde_x, lde_x, lde_n * sizeof(uint32_t), cudaMemcpyHostToDevice));
+    free(lde_x);
+
+    // Merkle tree pre-allocation
+    int n_leaves_raw = (lde_n + 7) / 8;
+    b.mk_n_leaves = 1;
+    while (b.mk_n_leaves < n_leaves_raw) b.mk_n_leaves <<= 1;
+    b.mk_n_levels = 0;
+    b.mk_total = 0;
+    { int s = b.mk_n_leaves; while (s >= 1) { b.mk_total += s; b.mk_n_levels++; s /= 2; } }
+    b.mk_offsets = (int*)malloc(b.mk_n_levels * sizeof(int));
+    { int off = 0, s = b.mk_n_leaves;
+      for (int k = 0; k < b.mk_n_levels; k++) { b.mk_offsets[k] = off * 8; off += s; s /= 2; } }
+
+    CHECK(cudaMalloc(&b.d_tree_t, b.mk_total * 8 * sizeof(uint32_t)));
+    CHECK(cudaMalloc(&b.d_tree_q, b.mk_total * 8 * sizeof(uint32_t)));
+
+    // Counters
+    CHECK(cudaMalloc(&b.d_perms, sizeof(unsigned long long)));
+    CHECK(cudaMalloc(&b.d_found, sizeof(int)));
+    CHECK(cudaMalloc(&b.d_slot, sizeof(int)));
+    CHECK(cudaMalloc(&b.d_state, W * sizeof(uint32_t)));
+
+    // Host trace buffer
+    b.h_trace = (uint32_t*)malloc(b.n * sizeof(uint32_t));
+
+    // Boundary points (fixed for this trace size)
+    int half_n = b.n / 2;
+    b.x_b0 = b.trace_dom.half_x[half_n - 2];
+    b.x_b1 = b.trace_dom.half_x[half_n - 1];
+
+    return b;
+}
+
+// Run one STARK proof — no cudaMalloc, no intermediate sync, one sync at end.
+// Returns Poseidon2 perm count from Merkle trees.
+uint64_t stark_prove_fast(StarkBufs* b, uint32_t a0, uint32_t a1, cudaStream_t stream) {
+    int n = b->n, lde_n = b->lde_n;
+    int threads = 256;
+
+    // Reset counters (async, no sync)
+    CHECK(cudaMemsetAsync(b->d_perms, 0, sizeof(unsigned long long), stream));
+    CHECK(cudaMemsetAsync(b->d_found, 0, sizeof(int), stream));
+
+    // 1. Generate trace on CPU, upload
+    b->h_trace[0] = a0; b->h_trace[1] = a1;
+    for (int i = 2; i < n; i++) b->h_trace[i] = m31_add(b->h_trace[i-1], b->h_trace[i-2]);
+    CHECK(cudaMemcpyAsync(b->d_a, b->h_trace, n * sizeof(uint32_t), cudaMemcpyHostToDevice, stream));
+
+    // 2. Compute constraint on GPU BEFORE iCFFT modifies trace
+    k_constraint_vals<<<div_up(n, threads), threads, 0, stream>>>(b->d_a, b->d_c, n);
+
+    // 3. iCFFT trace → coefficients
+    gpu_icfft(b->d_a, b->d_b, b->log_trace, &b->trace_inv_tw, stream);
+
+    // 4. Pad to LDE, CFFT → trace LDE evaluations
+    CHECK(cudaMemsetAsync(b->d_a + n, 0, (lde_n - n) * sizeof(uint32_t), stream));
+    gpu_cfft(b->d_a, b->d_b, b->log_lde, &b->lde_fwd_tw, stream);
+
+    // 5. Merkle commit trace (pre-allocated tree, no cudaMalloc)
+    CHECK(cudaMemsetAsync(b->d_tree_t, 0, b->mk_total * 8 * sizeof(uint32_t), stream));
+    CHECK(cudaMemcpyAsync(b->d_tree_t, b->d_a, lde_n * sizeof(uint32_t),
+                          cudaMemcpyDeviceToDevice, stream));
+    { int cur = b->mk_n_leaves;
+      for (int k = 0; k < b->mk_n_levels - 1; k++) {
+          int np = cur / 2;
+          k_merkle_level<<<div_up(np, threads), threads, 0, stream>>>(
+              b->d_tree_t + b->mk_offsets[k], b->d_tree_t + b->mk_offsets[k+1],
+              np, b->d_perms, b->d_found, b->d_slot, b->d_state);
+          cur = np;
+      }
+    }
+
+    // 6. iCFFT constraint → coefficients
+    gpu_icfft(b->d_c, b->d_b, b->log_trace, &b->trace_inv_tw, stream);
+
+    // 7. Pad + CFFT → constraint LDE
+    CHECK(cudaMemsetAsync(b->d_c + n, 0, (lde_n - n) * sizeof(uint32_t), stream));
+    gpu_cfft(b->d_c, b->d_b, b->log_lde, &b->lde_fwd_tw, stream);
+
+    // 8. Constraint quotient
+    k_quotient<<<div_up(lde_n, threads), threads, 0, stream>>>(
+        b->d_c, b->d_q, b->d_lde_x, b->x_b0, b->x_b1, b->log_trace, lde_n);
+
+    // 9. Merkle commit quotient (pre-allocated)
+    CHECK(cudaMemsetAsync(b->d_tree_q, 0, b->mk_total * 8 * sizeof(uint32_t), stream));
+    CHECK(cudaMemcpyAsync(b->d_tree_q, b->d_q, lde_n * sizeof(uint32_t),
+                          cudaMemcpyDeviceToDevice, stream));
+    { int cur = b->mk_n_leaves;
+      for (int k = 0; k < b->mk_n_levels - 1; k++) {
+          int np = cur / 2;
+          k_merkle_level<<<div_up(np, threads), threads, 0, stream>>>(
+              b->d_tree_q + b->mk_offsets[k], b->d_tree_q + b->mk_offsets[k+1],
+              np, b->d_perms, b->d_found, b->d_slot, b->d_state);
+          cur = np;
+      }
+    }
+
+    // 10. FRI fold chain (fixed alphas — same computational cost)
+    //     Reuse d_a, d_c as ping-pong buffers (done being used)
+    uint32_t alpha = 12345;
+    uint32_t *fri_in = b->d_q, *fri_out = b->d_a;
+    int fri_size = lde_n;
+    int tw_idx = 0;
+
+    // Circle fold: lde_n → lde_n/2
+    k_fri_fold<<<div_up(fri_size/2, threads), threads, 0, stream>>>(
+        fri_in, fri_out, b->lde_inv_tw.d_flat, b->lde_inv_tw.offsets[tw_idx],
+        alpha, fri_size / 2);
+    fri_in = fri_out;
+    fri_size /= 2;
+    tw_idx++;
+
+    // Line folds
+    while (fri_size > FRI_STOP) {
+        alpha = (alpha * 7 + 1) & P;
+        uint32_t *next = (fri_in == b->d_a) ? b->d_c : b->d_a;
+        k_fri_fold<<<div_up(fri_size/2, threads), threads, 0, stream>>>(
+            fri_in, next, b->lde_inv_tw.d_flat, b->lde_inv_tw.offsets[tw_idx],
+            alpha, fri_size / 2);
+        fri_in = next;
+        fri_size /= 2;
+        tw_idx++;
+    }
+
+    // SINGLE sync at the very end — no intermediate waits
+    CHECK(cudaStreamSynchronize(stream));
+
+    unsigned long long perms;
+    CHECK(cudaMemcpy(&perms, b->d_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    return perms;
+}
+
+void stark_bufs_free(StarkBufs* b) {
+    cudaFree(b->d_a); cudaFree(b->d_b); cudaFree(b->d_c); cudaFree(b->d_q);
+    cudaFree(b->d_lde_x);
+    cudaFree(b->d_tree_t); cudaFree(b->d_tree_q);
+    cudaFree(b->d_perms); cudaFree(b->d_found); cudaFree(b->d_slot); cudaFree(b->d_state);
+    free(b->h_trace);
+    free(b->mk_offsets);
+    tw_free(&b->trace_inv_tw); tw_free(&b->lde_fwd_tw); tw_free(&b->lde_inv_tw);
+    cd_free(&b->trace_dom); cd_free(&b->lde_dom);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Host: Benchmark
 // ═══════════════════════════════════════════════════════════════
 
@@ -933,9 +1144,15 @@ int main(int argc, char** argv) {
 
     cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
 
-    // ── Phase 3: Symbiotic (STARK proofs + PoW concurrent) ──
+    // ── Phase 3: Symbiotic (STARK + PoW concurrent) ──
     printf("\n── Phase 3: Symbiotic (STARK + PoW, %.1fs) ─────\n", run_sec);
     printf("  PoW blocks : %d (same as Pure — full GPU)\n", pow_blocks);
+    printf("  STARK mode : pre-allocated (no cudaMalloc, no mid-sync)\n");
+
+    // Pre-allocate ALL STARK buffers BEFORE starting PoW
+    StarkBufs sbufs = stark_bufs_alloc(log_trace);
+    // Warm up pre-alloc prover
+    stark_prove_fast(&sbufs, 1, 1, s_stark);
 
     // Launch PoW on FULL GPU (same blocks as Phase 2)
     // Both PoW and STARK compete for the same SMs — realistic scenario.
@@ -950,12 +1167,13 @@ int main(int argc, char** argv) {
         0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
 
     // Run STARK proofs on s_stark stream simultaneously
+    // Using pre-allocated prover: no cudaMalloc/Free, one sync per proof
     tw0 = wall_time();
     uint64_t stark_perms_total = 0;
     int stark_count = 0;
     while (wall_time() - tw0 < run_sec) {
-        StarkTiming t = gpu_stark_prove(log_trace, 200 + stark_count, 1, &rc, s_stark);
-        stark_perms_total += t.poseidon_perms;
+        uint64_t p = stark_prove_fast(&sbufs, 200 + stark_count, 1, s_stark);
+        stark_perms_total += p;
         stark_count++;
     }
 
@@ -990,6 +1208,7 @@ int main(int argc, char** argv) {
     printf("  f_sym (ZK frac) : %.1f%%\n", f_sym);
 
     cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
+    stark_bufs_free(&sbufs);
 
     // ── Summary ──
     printf("\n════════════════════════════════════════════════════\n");
