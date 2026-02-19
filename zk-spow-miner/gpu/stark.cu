@@ -1256,6 +1256,11 @@ const char* fmt(uint64_t n, char* buf) {
 }
 
 // ── 3-Mode measurement result ──
+// A = Pure PoW (GPU packed with PoW only)
+// B = STARK + PoW concurrent (count PoW perms only)
+// C = STARK + PoW concurrent (count all: PoW + STARK Merkle tickets)
+// B and C have IDENTICAL GPU workload; C adds STARK Merkle perms to the count.
+// All modes keep the GPU fully occupied (pre-queued PoW fills STARK gaps).
 struct SweepResult {
     int log_trace;
     double stark_ms;
@@ -1467,16 +1472,16 @@ int main(int argc, char** argv) {
                 k, k, 1 << k);
             results[i] = run_3mode(k, difficulty, run_sec, &rc, sms, true);
             SweepResult& r = results[i];
-            printf("  → A=%.1f  B=%.1f  C=%.1f Mperm/s  ZK=%+.1f%%  Sym=%+.1f%%  Net=%+.1f%%\n",
+            printf("  → A=%.1f  B=%.1f  C=%.1f Mperm/s  ZK=%+.1f%%  Sym=%+.1f%%  Net=%+.1f%%  f_sym=%.1f%%\n",
                 r.mode_a / 1e6, r.mode_b / 1e6, r.mode_c / 1e6,
-                -r.zk_overhead, r.sym_recovery, -r.net_cost);
+                -r.zk_overhead, r.sym_recovery, -r.net_cost, r.f_sym);
         }
 
         // Summary table
         printf("\n\n════════════════════════════════════════════════════════════════════════════\n");
         printf("ZK-SPoW Sweep Summary — 3-Mode Comparison\n");
         printf("════════════════════════════════════════════════════════════════════════════\n");
-        printf("  k   trace   STARK     perms   A(Pure)   B(ZK+PoW)   C(ZK-SPoW)  ZK cost  Sym rec  Net cost  f_sym\n");
+        printf("  k   trace   STARK     perms   A(Pure)  B(ZK+PoW)  C(ZK-SPoW+PoW)  ZK cost  Sym rec  Net cost  f_sym\n");
         printf("────────────────────────────────────────────────────────────────────────────────────────────────────────\n");
         for (int i = 0; i < n_sizes; i++) {
             SweepResult& r = results[i];
@@ -1487,8 +1492,9 @@ int main(int argc, char** argv) {
                 -r.zk_overhead, r.sym_recovery, -r.net_cost, r.f_sym);
         }
         printf("════════════════════════════════════════════════════════════════════════════\n");
-        printf("  A = Pure PoW (Mperm/s)     B = ZK + PoW, no sym (Mperm/s)\n");
-        printf("  C = ZK-SPoW, sym (Mperm/s) ZK cost = A→B   Sym rec = B→C   Net = A→C\n");
+        printf("  A = Pure PoW only          B = STARK + PoW (count PoW only)\n");
+        printf("  C = STARK + PoW (count all)  ZK cost = A→B  Sym rec = B→C  Net = A→C\n");
+        printf("  B and C run identical GPU workload; C also counts STARK Merkle tickets\n");
         printf("════════════════════════════════════════════════════════════════════════════\n");
 
         // Check if Sym recovery is positive across all sizes
@@ -1567,9 +1573,9 @@ int main(int argc, char** argv) {
         printf("────────────────────────────────────────────────────\n");
         printf("A. Pure PoW        : %8.2f Mperm/s  (100.0%%)\n", sr.mode_a / 1e6);
         printf("   spread          : %.1f%%\n", sr.spread);
-        printf("B. ZK + PoW (no sym): %7.2f Mperm/s  (%5.1f%%)\n",
+        printf("B. STARK+PoW (PoW only): %6.2f Mperm/s  (%5.1f%%)\n",
             sr.mode_b / 1e6, sr.mode_b / sr.mode_a * 100);
-        printf("C. ZK-SPoW (sym)   : %8.2f Mperm/s  (%5.1f%%)\n",
+        printf("C. ZK-SPoW+PoW (all)  : %6.2f Mperm/s  (%5.1f%%)\n",
             sr.mode_c / 1e6, sr.mode_c / sr.mode_a * 100);
         printf("────────────────────────────────────────────────────\n");
         printf("ZK overhead  (A→B): %+.1f%%  (cost of running STARK proofs)\n", -sr.zk_overhead);
