@@ -935,9 +935,10 @@ int main(int argc, char** argv) {
 
     // ── Phase 3: Symbiotic (STARK proofs + PoW concurrent) ──
     printf("\n── Phase 3: Symbiotic (STARK + PoW, %.1fs) ─────\n", run_sec);
+    printf("  PoW blocks : %d (same as Pure — full GPU)\n", pow_blocks);
 
-    // Launch PoW on half the GPU
-    int sym_pow_blocks = sms * 2;  // half GPU for PoW
+    // Launch PoW on FULL GPU (same blocks as Phase 2)
+    // Both PoW and STARK compete for the same SMs — realistic scenario.
     CHECK(cudaMalloc(&d_pow_stop, sizeof(int)));
     CHECK(cudaMalloc(&d_pow_perms, sizeof(unsigned long long)));
     CHECK(cudaMalloc(&d_pow_nonce, sizeof(unsigned long long)));
@@ -945,7 +946,7 @@ int main(int argc, char** argv) {
     CHECK(cudaMemset(d_pow_stop, 0, sizeof(int)));
     CHECK(cudaMemset(d_pow_perms, 0, sizeof(unsigned long long)));
 
-    k_pow<<<sym_pow_blocks, pow_threads, 0, s_pow>>>(
+    k_pow<<<pow_blocks, pow_threads, 0, s_pow>>>(
         0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
 
     // Run STARK proofs on s_stark stream simultaneously
@@ -966,17 +967,27 @@ int main(int argc, char** argv) {
     unsigned long long sym_pow_perms;
     CHECK(cudaMemcpy(&sym_pow_perms, d_pow_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
 
+    // ── Separate reporting ──
+    double pow_only_rate = sym_pow_perms / sym_elapsed;
+    double stark_bonus_rate = stark_perms_total / sym_elapsed;
     uint64_t sym_total = sym_pow_perms + stark_perms_total;
     double sym_rate = sym_total / sym_elapsed;
 
-    printf("STARK proofs : %d (in %.1fs)\n", stark_count, sym_elapsed);
-    printf("STARK perms  : %s (Poseidon2)\n", fmt(stark_perms_total, buf));
-    printf("PoW perms    : %s\n", fmt(sym_pow_perms, buf));
-    printf("Total perms  : %s\n", fmt(sym_total, buf));
-    printf("Rate         : %.2f Mperm/s\n", sym_rate / 1e6);
+    double pow_degradation = (1.0 - pow_only_rate / pure_pow_rate) * 100;
+    double net_overhead = (1.0 - sym_rate / pure_pow_rate) * 100;
+
+    printf("\n  PoW-only   : %s perms → %.2f Mperm/s\n",
+        fmt(sym_pow_perms, buf), pow_only_rate / 1e6);
+    printf("  STARK bonus: %s perms → %.2f Mperm/s  (%d proofs)\n",
+        fmt(stark_perms_total, buf), stark_bonus_rate / 1e6, stark_count);
+    printf("  Combined   : %s perms → %.2f Mperm/s\n",
+        fmt(sym_total, buf), sym_rate / 1e6);
+    printf("\n  PoW degradation : %.1f%%  (cost of running STARK)\n", pow_degradation);
+    printf("  STARK recovery  : +%.2f Mperm/s  (Merkle tickets)\n", stark_bonus_rate / 1e6);
+    printf("  Net overhead    : %.1f%%\n", net_overhead);
 
     double f_sym = (double)stark_perms_total / sym_total * 100;
-    printf("f_sym        : %.1f%%\n", f_sym);
+    printf("  f_sym (ZK frac) : %.1f%%\n", f_sym);
 
     cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
 
@@ -992,21 +1003,27 @@ int main(int argc, char** argv) {
         t_memory / avg.t_total * 100);
     printf("────────────────────────────────────────────────────\n");
     printf("Pure PoW     : %8.2f Mperm/s  (baseline)\n", pure_pow_rate / 1e6);
-    printf("Symbiotic    : %8.2f Mperm/s  (%.1f%% of baseline)\n",
+    printf("Sym PoW-only : %8.2f Mperm/s  (%.1f%% of baseline)\n",
+        pow_only_rate / 1e6, pow_only_rate / pure_pow_rate * 100);
+    printf("STARK bonus  : %8.2f Mperm/s  (Merkle tickets)\n", stark_bonus_rate / 1e6);
+    printf("Sym combined : %8.2f Mperm/s  (%.1f%% of baseline)\n",
         sym_rate / 1e6, sym_rate / pure_pow_rate * 100);
     printf("────────────────────────────────────────────────────\n");
+    printf("PoW degradation    : %.1f%%  (STARK steals this from PoW)\n", pow_degradation);
+    printf("STARK recovery     : +%.2f Mperm/s\n", stark_bonus_rate / 1e6);
+    printf("Net overhead       : %.1f%%  (combined vs baseline)\n", net_overhead);
+    printf("f_sym (ZK frac)    : %.1f%%\n", f_sym);
+    printf("────────────────────────────────────────────────────\n");
 
-    double overhead = (1.0 - sym_rate / pure_pow_rate) * 100;
-    if (overhead < 0) overhead = 0;
-    printf("Symbiotic overhead : %.1f%%\n", overhead);
-    printf("f_sym (STARK frac) : %.1f%%\n", f_sym);
-
-    if (sym_rate >= pure_pow_rate * 0.90)
-        printf("VERDICT : Complementary bottleneck CONFIRMED (<10%% overhead)\n");
-    else if (sym_rate >= pure_pow_rate * 0.70)
-        printf("VERDICT : Partial overlap (%.0f%% overhead)\n", overhead);
+    if (net_overhead <= 10.0)
+        printf("VERDICT : Complementary bottleneck CONFIRMED (net <=10%% overhead)\n");
+    else if (net_overhead <= 30.0)
+        printf("VERDICT : Partial complementarity (net %.0f%% overhead)\n", net_overhead);
     else
-        printf("VERDICT : Bottleneck NOT complementary (%.0f%% overhead)\n", overhead);
+        printf("VERDICT : Bottleneck NOT complementary (net %.0f%% overhead)\n", net_overhead);
+
+    if (pow_degradation > 5.0)
+        printf("NOTE    : PoW rate dropped %.1f%% — STARK does consume GPU resources\n", pow_degradation);
 
     printf("════════════════════════════════════════════════════\n");
 
