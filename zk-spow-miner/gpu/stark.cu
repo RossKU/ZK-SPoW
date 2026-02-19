@@ -791,10 +791,23 @@ StarkTiming gpu_stark_prove(
     fri_size /= 2;
     int tw_idx = 1;
 
-    // Line folds until FRI_STOP
+    // Line folds until FRI_STOP — with Merkle commit + Fiat-Shamir per layer
     while (fri_size > FRI_STOP) {
-        // Derive next alpha
-        uint32_t alpha = (uint32_t)rng_next() & P;
+        // Merkle commit current FRI layer
+        MerkleGPU fri_tree = gpu_merkle_build(d_fri_cur, fri_size, stream,
+                                               d_perms, d_found, d_slot, d_state);
+        uint32_t fri_mk_root[8];
+        merkle_root(&fri_tree, fri_mk_root, stream);
+
+        // Fiat-Shamir: hash(fri_root || "FRI2") → alpha
+        uint32_t fs2[W] = {};
+        memcpy(fs2, fri_mk_root, 8 * sizeof(uint32_t));
+        fs2[8] = 0x46524932;  // "FRI2"
+        h_poseidon2(fs2, rc);
+        uint32_t alpha = fs2[0] & P;
+
+        merkle_free(&fri_tree);
+
         uint32_t *d_next;
         CHECK(cudaMalloc(&d_next, (fri_size / 2) * sizeof(uint32_t)));
         k_fri_fold<<<div_up(fri_size/2, threads), threads, 0, stream>>>(
@@ -843,8 +856,15 @@ StarkTiming gpu_stark_prove(
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Pre-allocated STARK prover (Phase 3: no malloc, no sync gaps)
+// Pre-allocated STARK prover (complete: Fiat-Shamir + FRI Merkle + query)
 // ═══════════════════════════════════════════════════════════════
+
+struct FRILayerInfo {
+    int input_size;       // values in this layer (before fold)
+    int mk_n_leaves, mk_n_levels, mk_total;
+    int *mk_offsets;      // level offsets in uint32_t count
+    int pool_offset;      // word offset into d_fri_pool
+};
 
 struct StarkBufs {
     int log_trace, log_lde, n, lde_n;
@@ -855,10 +875,15 @@ struct StarkBufs {
     uint32_t *d_a, *d_b, *d_c, *d_q;   // each lde_n words
     uint32_t *d_lde_x;                  // lde_n words (static)
 
-    // Pre-allocated Merkle trees
+    // Pre-allocated Merkle trees (trace + quotient)
     uint32_t *d_tree_t, *d_tree_q;
     int mk_n_leaves, mk_n_levels, mk_total;
     int *mk_offsets;  // level offsets in uint32_t count
+
+    // FRI intermediate Merkle trees (pre-allocated)
+    int n_fri_layers;
+    FRILayerInfo *fri;
+    uint32_t *d_fri_pool;   // single GPU alloc for all FRI trees
 
     // Counters
     unsigned long long *d_perms;
@@ -867,9 +892,12 @@ struct StarkBufs {
 
     uint32_t *h_trace;
     uint32_t x_b0, x_b1;
+
+    // Fiat-Shamir
+    const RC *rc;
 };
 
-StarkBufs stark_bufs_alloc(int log_trace) {
+StarkBufs stark_bufs_alloc(int log_trace, const RC* rc) {
     StarkBufs b = {};
     b.log_trace = log_trace;
     b.log_lde = log_trace + LOG_BLOWUP;
@@ -928,11 +956,43 @@ StarkBufs stark_bufs_alloc(int log_trace) {
     b.x_b0 = b.trace_dom.half_x[half_n - 2];
     b.x_b1 = b.trace_dom.half_x[half_n - 1];
 
+    // FRI intermediate Merkle trees (pre-allocated)
+    // After circle fold: size = lde_n/2. Line folds commit while size > FRI_STOP.
+    b.n_fri_layers = 0;
+    { int s = lde_n / 2; while (s > FRI_STOP) { b.n_fri_layers++; s /= 2; } }
+
+    b.fri = (FRILayerInfo*)calloc(b.n_fri_layers, sizeof(FRILayerInfo));
+    int fri_pool_total = 0;
+    { int s = lde_n / 2;
+      for (int k = 0; k < b.n_fri_layers; k++) {
+          FRILayerInfo& f = b.fri[k];
+          f.input_size = s;
+          int raw = (s + 7) / 8;
+          f.mk_n_leaves = 1;
+          while (f.mk_n_leaves < raw) f.mk_n_leaves <<= 1;
+          f.mk_n_levels = 0;
+          f.mk_total = 0;
+          { int t = f.mk_n_leaves; while (t >= 1) { f.mk_total += t; f.mk_n_levels++; t /= 2; } }
+          f.mk_offsets = (int*)malloc(f.mk_n_levels * sizeof(int));
+          { int off2 = 0, t = f.mk_n_leaves;
+            for (int j = 0; j < f.mk_n_levels; j++) { f.mk_offsets[j] = off2 * 8; off2 += t; t /= 2; } }
+          f.pool_offset = fri_pool_total * 8;  // word offset
+          fri_pool_total += f.mk_total;
+          s /= 2;
+      }
+    }
+    if (fri_pool_total > 0)
+        CHECK(cudaMalloc(&b.d_fri_pool, fri_pool_total * 8 * sizeof(uint32_t)));
+    else
+        b.d_fri_pool = nullptr;
+
+    b.rc = rc;
+
     return b;
 }
 
-// Run one STARK proof — no cudaMalloc, no intermediate sync, one sync at end.
-// Returns Poseidon2 perm count from Merkle trees.
+// Run one COMPLETE STARK proof — Fiat-Shamir + FRI Merkle commits + query phase.
+// Returns total Poseidon2 perm count (trace + quotient + FRI Merkle trees + Fiat-Shamir).
 uint64_t stark_prove_fast(StarkBufs* b, uint32_t a0, uint32_t a1, cudaStream_t stream) {
     int n = b->n, lde_n = b->lde_n;
     int threads = 256;
@@ -956,7 +1016,7 @@ uint64_t stark_prove_fast(StarkBufs* b, uint32_t a0, uint32_t a1, cudaStream_t s
     CHECK(cudaMemsetAsync(b->d_a + n, 0, (lde_n - n) * sizeof(uint32_t), stream));
     gpu_cfft(b->d_a, b->d_b, b->log_lde, &b->lde_fwd_tw, stream);
 
-    // 5. Merkle commit trace (pre-allocated tree, no cudaMalloc)
+    // 5. Merkle commit trace (pre-allocated tree)
     CHECK(cudaMemsetAsync(b->d_tree_t, 0, b->mk_total * 8 * sizeof(uint32_t), stream));
     CHECK(cudaMemcpyAsync(b->d_tree_t, b->d_a, lde_n * sizeof(uint32_t),
                           cudaMemcpyDeviceToDevice, stream));
@@ -969,6 +1029,12 @@ uint64_t stark_prove_fast(StarkBufs* b, uint32_t a0, uint32_t a1, cudaStream_t s
           cur = np;
       }
     }
+
+    // 5a. SYNC + read trace_root (required for Fiat-Shamir)
+    CHECK(cudaStreamSynchronize(stream));
+    uint32_t trace_root[8];
+    int t_root_off = b->mk_offsets[b->mk_n_levels - 1];
+    CHECK(cudaMemcpy(trace_root, b->d_tree_t + t_root_off, 8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
     // 6. iCFFT constraint → coefficients
     gpu_icfft(b->d_c, b->d_b, b->log_trace, &b->trace_inv_tw, stream);
@@ -995,38 +1061,163 @@ uint64_t stark_prove_fast(StarkBufs* b, uint32_t a0, uint32_t a1, cudaStream_t s
       }
     }
 
-    // 10. FRI fold chain (fixed alphas — same computational cost)
-    //     Reuse d_a, d_c as ping-pong buffers (done being used)
-    uint32_t alpha = 12345;
-    uint32_t *fri_in = b->d_q, *fri_out = b->d_a;
-    int fri_size = lde_n;
-    int tw_idx = 0;
+    // 9a. SYNC + read quotient_root
+    CHECK(cudaStreamSynchronize(stream));
+    uint32_t quot_root[8];
+    CHECK(cudaMemcpy(quot_root, b->d_tree_q + t_root_off, 8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
-    // Circle fold: lde_n → lde_n/2
-    k_fri_fold<<<div_up(fri_size/2, threads), threads, 0, stream>>>(
-        fri_in, fri_out, b->lde_inv_tw.d_flat, b->lde_inv_tw.offsets[tw_idx],
-        alpha, fri_size / 2);
-    fri_in = fri_out;
-    fri_size /= 2;
-    tw_idx++;
+    // 10. Fiat-Shamir: derive FRI alphas from trace_root + quotient_root
+    uint32_t fs[W] = {};
+    memcpy(fs, trace_root, 8 * sizeof(uint32_t));
+    memcpy(fs + 8, quot_root, 8 * sizeof(uint32_t));
+    fs[16] = 0x46524931;  // "FRI1"
+    h_poseidon2(fs, b->rc);
 
-    // Line folds
-    while (fri_size > FRI_STOP) {
-        alpha = (alpha * 7 + 1) & P;
-        uint32_t *next = (fri_in == b->d_a) ? b->d_c : b->d_a;
-        k_fri_fold<<<div_up(fri_size/2, threads), threads, 0, stream>>>(
-            fri_in, next, b->lde_inv_tw.d_flat, b->lde_inv_tw.offsets[tw_idx],
-            alpha, fri_size / 2);
-        fri_in = next;
-        fri_size /= 2;
+    uint64_t rng_state = (uint64_t)fs[0] | ((uint64_t)fs[1] << 32) | 1;
+    auto rng_next = [&]() -> uint64_t {
+        rng_state ^= rng_state << 13; rng_state ^= rng_state >> 7;
+        rng_state ^= rng_state << 17; return rng_state;
+    };
+
+    // 11. Circle fold with REAL alpha0 (quotient → d_a, lde_n → lde_n/2)
+    uint32_t alpha0 = (uint32_t)rng_next() & P;
+    k_fri_fold<<<div_up(lde_n/2, threads), threads, 0, stream>>>(
+        b->d_q, b->d_a, b->lde_inv_tw.d_flat, b->lde_inv_tw.offsets[0],
+        alpha0, lde_n / 2);
+
+    // 12. FRI loop: Merkle commit + Fiat-Shamir + fold (matches CPU cstark_prove)
+    uint32_t *fri_cur = b->d_a;
+    int tw_idx = 1;
+    for (int k = 0; k < b->n_fri_layers; k++) {
+        FRILayerInfo& f = b->fri[k];
+        uint32_t *d_tree = b->d_fri_pool + f.pool_offset;
+
+        // 12a. Merkle commit current FRI layer (pre-allocated tree)
+        CHECK(cudaMemsetAsync(d_tree, 0, f.mk_total * 8 * sizeof(uint32_t), stream));
+        CHECK(cudaMemcpyAsync(d_tree, fri_cur, f.input_size * sizeof(uint32_t),
+                              cudaMemcpyDeviceToDevice, stream));
+        { int cur = f.mk_n_leaves;
+          for (int j = 0; j < f.mk_n_levels - 1; j++) {
+              int np = cur / 2;
+              k_merkle_level<<<div_up(np, threads), threads, 0, stream>>>(
+                  d_tree + f.mk_offsets[j], d_tree + f.mk_offsets[j+1],
+                  np, b->d_perms, b->d_found, b->d_slot, b->d_state);
+              cur = np;
+          }
+        }
+
+        // 12b. SYNC + read FRI root
+        CHECK(cudaStreamSynchronize(stream));
+        uint32_t fri_root[8];
+        int root_off = f.mk_offsets[f.mk_n_levels - 1];
+        CHECK(cudaMemcpy(fri_root, d_tree + root_off, 8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+
+        // 12c. Fiat-Shamir: hash(fri_root || "FRI2") → alpha
+        uint32_t fs2[W] = {};
+        memcpy(fs2, fri_root, 8 * sizeof(uint32_t));
+        fs2[8] = 0x46524932;  // "FRI2"
+        h_poseidon2(fs2, b->rc);
+        uint32_t alpha = fs2[0] & P;
+
+        // 12d. FRI line fold with real alpha (ping-pong fri_cur → other buffer)
+        uint32_t *next = (fri_cur == b->d_a) ? b->d_c : b->d_a;
+        int half = f.input_size / 2;
+        k_fri_fold<<<div_up(half, threads), threads, 0, stream>>>(
+            fri_cur, next, b->lde_inv_tw.d_flat, b->lde_inv_tw.offsets[tw_idx],
+            alpha, half);
+        fri_cur = next;
         tw_idx++;
     }
 
-    // SINGLE sync at the very end — no intermediate waits
+    // 13. Read FRI final values (<=FRI_STOP values)
+    int fri_final_size = b->n_fri_layers > 0 ? b->fri[b->n_fri_layers - 1].input_size / 2 : lde_n / 2;
+    uint32_t fri_last[FRI_STOP];
     CHECK(cudaStreamSynchronize(stream));
+    CHECK(cudaMemcpy(fri_last, fri_cur, fri_final_size * sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
+    // 14. Query phase: derive positions and extract Merkle authentication paths
+    //     This is the decommitment — proof is incomplete without it.
+    for (int q = 0; q < N_QUERIES; q++) {
+        int pos = (int)(rng_next() % (uint64_t)lde_n);
+        int t_leaf = (pos / 8) < b->mk_n_leaves ? (pos / 8) : b->mk_n_leaves - 1;
+
+        // Extract trace auth path (read sibling at each level)
+        { int idx = t_leaf;
+          for (int lv = 0; lv < b->mk_n_levels - 1; lv++) {
+              int sib = (idx ^ 1) < (b->mk_n_leaves >> lv) ? (idx ^ 1) : idx;
+              uint32_t sib_node[8];
+              CHECK(cudaMemcpy(sib_node, b->d_tree_t + b->mk_offsets[lv] + sib * 8,
+                               8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+              idx >>= 1;
+          }
+        }
+
+        // Extract quotient auth path (same tree structure)
+        { int idx = t_leaf;
+          for (int lv = 0; lv < b->mk_n_levels - 1; lv++) {
+              int sib = (idx ^ 1) < (b->mk_n_leaves >> lv) ? (idx ^ 1) : idx;
+              uint32_t sib_node[8];
+              CHECK(cudaMemcpy(sib_node, b->d_tree_q + b->mk_offsets[lv] + sib * 8,
+                               8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+              idx >>= 1;
+          }
+        }
+
+        // Extract quotient conjugate path (circle fold partner)
+        { int conj_pos = pos < lde_n / 2 ? pos + lde_n / 2 : pos - lde_n / 2;
+          int conj_leaf = (conj_pos / 8) < b->mk_n_leaves ? (conj_pos / 8) : b->mk_n_leaves - 1;
+          int idx = conj_leaf;
+          for (int lv = 0; lv < b->mk_n_levels - 1; lv++) {
+              int sib = (idx ^ 1) < (b->mk_n_leaves >> lv) ? (idx ^ 1) : idx;
+              uint32_t sib_node[8];
+              CHECK(cudaMemcpy(sib_node, b->d_tree_q + b->mk_offsets[lv] + sib * 8,
+                               8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+              idx >>= 1;
+          }
+        }
+
+        // Extract FRI layer openings + fold partner paths
+        int cur_pos = pos % (lde_n / 2);
+        int cur_size = lde_n / 2;
+        for (int k = 0; k < b->n_fri_layers; k++) {
+            FRILayerInfo& f = b->fri[k];
+            uint32_t *d_tree = b->d_fri_pool + f.pool_offset;
+            int leaf = (cur_pos / 8) < f.mk_n_leaves ? (cur_pos / 8) : f.mk_n_leaves - 1;
+
+            // Opening path
+            { int idx = leaf;
+              for (int lv = 0; lv < f.mk_n_levels - 1; lv++) {
+                  int sib = (idx ^ 1) < (f.mk_n_leaves >> lv) ? (idx ^ 1) : idx;
+                  uint32_t sib_node[8];
+                  CHECK(cudaMemcpy(sib_node, d_tree + f.mk_offsets[lv] + sib * 8,
+                                   8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+                  idx >>= 1;
+              }
+            }
+
+            // Fold partner path
+            int half = cur_size / 2;
+            int p_pos = cur_pos < half ? cur_pos + half : cur_pos - half;
+            int p_leaf = (p_pos / 8) < f.mk_n_leaves ? (p_pos / 8) : f.mk_n_leaves - 1;
+            { int idx = p_leaf;
+              for (int lv = 0; lv < f.mk_n_levels - 1; lv++) {
+                  int sib = (idx ^ 1) < (f.mk_n_leaves >> lv) ? (idx ^ 1) : idx;
+                  uint32_t sib_node[8];
+                  CHECK(cudaMemcpy(sib_node, d_tree + f.mk_offsets[lv] + sib * 8,
+                                   8 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+                  idx >>= 1;
+              }
+            }
+
+            cur_pos %= half;
+            cur_size = half;
+        }
+    }
+
+    // 15. Total Poseidon2 perms (Merkle trees: trace + quotient + FRI + Fiat-Shamir)
     unsigned long long perms;
     CHECK(cudaMemcpy(&perms, b->d_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    perms += 1 + b->n_fri_layers;  // Fiat-Shamir: 1 initial + n per FRI layer
     return perms;
 }
 
@@ -1034,6 +1225,9 @@ void stark_bufs_free(StarkBufs* b) {
     cudaFree(b->d_a); cudaFree(b->d_b); cudaFree(b->d_c); cudaFree(b->d_q);
     cudaFree(b->d_lde_x);
     cudaFree(b->d_tree_t); cudaFree(b->d_tree_q);
+    if (b->d_fri_pool) cudaFree(b->d_fri_pool);
+    for (int k = 0; k < b->n_fri_layers; k++) free(b->fri[k].mk_offsets);
+    free(b->fri);
     cudaFree(b->d_perms); cudaFree(b->d_found); cudaFree(b->d_slot); cudaFree(b->d_state);
     free(b->h_trace);
     free(b->mk_offsets);
@@ -1140,9 +1334,10 @@ int main(int argc, char** argv) {
 
     // Time breakdown: Poseidon2 (Merkle) vs M31-only (FFT/quotient/FRI)
     double t_poseidon = avg.t_merkle_trace + avg.t_merkle_quot;
-    double t_memory = avg.t_icfft + avg.t_cfft + avg.t_quotient + avg.t_fri;
-    printf("\n  Poseidon2 time: %.1f%% (Merkle)\n", t_poseidon / avg.t_total * 100);
-    printf("  M31/memory time: %.1f%% (FFT + quotient + FRI)\n", t_memory / avg.t_total * 100);
+    double t_memory = avg.t_icfft + avg.t_cfft + avg.t_quotient;
+    printf("\n  Poseidon2 time: %.1f%% (Merkle trace+quot)\n", t_poseidon / avg.t_total * 100);
+    printf("  FRI time       : %.1f%% (Merkle commits + folds)\n", avg.t_fri / avg.t_total * 100);
+    printf("  M31/memory time: %.1f%% (FFT + quotient)\n", t_memory / avg.t_total * 100);
 
     // ═══════════════════════════════════════════════════════════════
     // Phases 2–4: Hashrate Invariance Test (§4.4)
@@ -1158,7 +1353,7 @@ int main(int argc, char** argv) {
     int pow_threads = 256;
 
     // Pre-allocate STARK buffers (shared across phases)
-    StarkBufs sbufs = stark_bufs_alloc(log_trace);
+    StarkBufs sbufs = stark_bufs_alloc(log_trace, &rc);
     stark_prove_fast(&sbufs, 1, 1, s_stark);  // warm up
 
     // ── Batched PoW: same launch pattern as STARK Merkle ──
@@ -1283,9 +1478,11 @@ int main(int argc, char** argv) {
     printf("════════════════════════════════════════════════════\n");
     printf("STARK proof    : %6.2f ms/proof  (%s Poseidon2 perms)\n",
         avg.t_total * 1e3, fmt(avg.poseidon_perms, buf));
-    printf("  Poseidon2    : %5.1f%%  (Merkle trees — ticket-producing)\n",
+    printf("  Merkle t+q   : %5.1f%%  (ticket-producing)\n",
         t_poseidon / avg.t_total * 100);
-    printf("  Memory-bound : %5.1f%%  (FFT/quotient/FRI — no tickets)\n",
+    printf("  FRI (Mk+fold): %5.1f%%  (Merkle commits + folds)\n",
+        avg.t_fri / avg.t_total * 100);
+    printf("  Memory-bound : %5.1f%%  (FFT + quotient)\n",
         t_memory / avg.t_total * 100);
     printf("────────────────────────────────────────────────────\n");
     printf("Pure PoW (avg) : %6.2f Mperm/s  (%6.2f Mticket/s)\n",
