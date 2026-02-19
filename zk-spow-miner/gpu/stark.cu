@@ -1471,48 +1471,65 @@ int main(int argc, char** argv) {
     double baseline_spread = fabs(pure_pow_rate_pre - pure_pow_rate_post) / pure_pow_rate * 100;
 
     // ═══════════════════════════════════════════════════════════════
-    // Summary — aligned with paper §4.4, §4.6, §A.5
+    // Summary — 3-Mode Comparison (ZK-SPoW value demonstration)
+    //
+    // A. Pure PoW           — baseline hashrate (no ZK)
+    // B. ZK + PoW (no sym)  — STARK proofs running, but Merkle perms
+    //                         NOT counted as tickets (ZK = pure cost)
+    // C. ZK-SPoW (sym)      — STARK Merkle perms counted as tickets
+    //                         (Symbiotic recovery)
+    //
+    // B is derived from Phase 3's PoW-only rate (same GPU workload
+    // as C, but only PoW batch perms count toward ticket rate).
     // ═══════════════════════════════════════════════════════════════
+
+    // Mode A = Pure PoW baseline (avg of pre/post)
+    double mode_a = pure_pow_rate;
+    // Mode B = ZK running but Merkle doesn't produce tickets
+    double mode_b = pow_only_rate;
+    // Mode C = ZK-SPoW (Merkle produces tickets)
+    double mode_c = sym_rate;
+
+    double zk_overhead = (1.0 - mode_b / mode_a) * 100;
+    double sym_recovery = (mode_c / mode_b - 1.0) * 100;
+    double net_cost = (1.0 - mode_c / mode_a) * 100;
+
     printf("\n════════════════════════════════════════════════════\n");
-    printf("RESULTS — §4.4 Hashrate Invariance Test\n");
+    printf("ZK-SPoW 3-Mode Comparison (trace=2^%d)\n", log_trace);
     printf("════════════════════════════════════════════════════\n");
-    printf("STARK proof    : %6.2f ms/proof  (%s Poseidon2 perms)\n",
+    printf("STARK proof      : %6.2f ms/proof  (%s Poseidon2 perms)\n",
         avg.t_total * 1e3, fmt(avg.poseidon_perms, buf));
-    printf("  Merkle t+q   : %5.1f%%  (ticket-producing)\n",
-        t_poseidon / avg.t_total * 100);
-    printf("  FRI (Mk+fold): %5.1f%%  (Merkle commits + folds)\n",
-        avg.t_fri / avg.t_total * 100);
-    printf("  Memory-bound : %5.1f%%  (FFT + quotient)\n",
-        t_memory / avg.t_total * 100);
+    printf("  Merkle t+q     : %5.1f%%\n", t_poseidon / avg.t_total * 100);
+    printf("  FRI (Mk+fold)  : %5.1f%%\n", avg.t_fri / avg.t_total * 100);
+    printf("  FFT+quotient   : %5.1f%%\n", t_memory / avg.t_total * 100);
     printf("────────────────────────────────────────────────────\n");
-    printf("Pure PoW (avg) : %6.2f Mperm/s  (%6.2f Mticket/s)\n",
-        pure_pow_rate / 1e6, pure_pow_rate * 3 / 1e6);
-    printf("  pre/post     : %.2f / %.2f Mperm/s  (spread %.1f%%)\n",
+    printf("A. Pure PoW        : %8.2f Mperm/s  (100.0%%)\n", mode_a / 1e6);
+    printf("   pre/post        : %.2f / %.2f  (spread %.1f%%)\n",
         pure_pow_rate_pre / 1e6, pure_pow_rate_post / 1e6, baseline_spread);
-    printf("Symbiotic      : %6.2f Mperm/s  (%6.2f Mticket/s)\n",
-        sym_rate / 1e6, sym_rate * 3 / 1e6);
-    printf("  PoW portion  : %6.2f Mperm/s\n", pow_only_rate / 1e6);
-    printf("  STARK Merkle : %6.2f Mperm/s  (%d proofs)\n", stark_rate / 1e6, stark_count);
+    printf("B. ZK + PoW (no sym): %7.2f Mperm/s  (%5.1f%%)\n",
+        mode_b / 1e6, mode_b / mode_a * 100);
+    printf("C. ZK-SPoW (sym)   : %8.2f Mperm/s  (%5.1f%%)\n",
+        mode_c / 1e6, mode_c / mode_a * 100);
+    printf("   PoW portion     : %8.2f Mperm/s\n", pow_only_rate / 1e6);
+    printf("   STARK Merkle    : %8.2f Mperm/s  (%d proofs)\n", stark_rate / 1e6, stark_count);
+    printf("────────────────────────────────────────────────────\n");
+    printf("ZK overhead  (A→B): %+.1f%%  (cost of running STARK proofs)\n", -zk_overhead);
+    printf("Sym recovery (B→C): %+.1f%%  (tickets from Merkle hashing)\n", sym_recovery);
+    printf("Net cost     (A→C): %+.1f%%\n", -net_cost);
+    printf("────────────────────────────────────────────────────\n");
+    printf("f_sym              : %.1f%%  (STARK fraction of total perms)\n", f_sym * 100);
+    printf("U_avg              : %.1f%%  (f_sym × 16/24)\n", u_avg * 100);
     printf("────────────────────────────────────────────────────\n");
 
-    // §4.4: Hashrate ratio (paper predicts ≈1.0, GPU may exceed due to parallelism)
-    double hashrate_ratio = sym_rate / pure_pow_rate;
-    printf("Hashrate ratio : %.3f  (§4.4 predicts ≥1.0)\n", hashrate_ratio);
-
-    // §A.5: f_sym and U_avg
-    printf("f_sym          : %.1f%%  (§A.5: STARK fraction of total perms)\n", f_sym * 100);
-    printf("U_avg          : %.1f%%  (f_sym × U, U=16/24≈67%%)\n", u_avg * 100);
-    printf("────────────────────────────────────────────────────\n");
-
-    if (hashrate_ratio >= 0.95)
-        printf("§4.4 CONFIRMED : Hashrate invariance holds (ratio %.3f ≥ 0.95)\n", hashrate_ratio);
-    else if (hashrate_ratio >= 0.80)
-        printf("§4.4 PARTIAL   : Mild interference (ratio %.3f)\n", hashrate_ratio);
+    if (net_cost <= 5.0)
+        printf("RESULT: ZK nearly free (net cost %.1f%%)\n", net_cost);
+    else if (sym_recovery > 1.0)
+        printf("RESULT: Symbiotic recovers %+.1f%% — ZK-SPoW reduces ZK cost\n", sym_recovery);
     else
-        printf("§4.4 VIOLATED  : Significant interference (ratio %.3f)\n", hashrate_ratio);
+        printf("RESULT: Symbiotic gain minimal (%.1f%%) — bottleneck not complementary\n", sym_recovery);
 
     if (baseline_spread > 10.0)
-        printf("WARNING : Baseline unstable (%.1f%% spread) — results unreliable\n", baseline_spread);
+        printf("WARNING: Baseline unstable (%.1f%% spread) — results unreliable\n", baseline_spread);
 
     printf("════════════════════════════════════════════════════\n");
 
