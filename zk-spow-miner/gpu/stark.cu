@@ -520,6 +520,37 @@ __global__ void k_pow(
 }
 
 // ═══════════════════════════════════════════════════════════════
+// GPU Kernel: Batched PoW (non-persistent, same pattern as Merkle)
+//
+// One thread = one Poseidon2 perm, then exit.
+// Same d_poseidon2() as k_merkle_level.  Apples-to-apples.
+// ═══════════════════════════════════════════════════════════════
+
+__global__ void k_pow_batch(
+    uint64_t nonce_base, int batch_size,
+    volatile int* found, int* found_slot, uint32_t* found_state
+) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= batch_size) return;
+
+    uint64_t nonce = nonce_base + (uint64_t)tid;
+    uint32_t s[W] = {};
+    s[0] = (uint32_t)(nonce) & P;
+    s[1] = (uint32_t)(nonce >> 31) & P;
+    s[8] = (uint32_t)(tid) & P;
+    for (int i = 0; i < 8; i++) s[16 + i] = d_h_h[i];
+
+    d_poseidon2(s);
+
+    for (int slot = 0; slot < 3; slot++) {
+        if (d_ticket_lt(&s[slot * 8]) && atomicCAS((int*)found, 0, 1) == 0) {
+            *found_slot = slot;
+            for (int j = 0; j < W; j++) found_state[j] = s[j];
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Host: Merkle tree utilities
 // ═══════════════════════════════════════════════════════════════
 
@@ -1124,40 +1155,58 @@ int main(int argc, char** argv) {
     // "Ticket rate" = total perms/sec (PoW nonce + STARK Merkle combined).
     // ═══════════════════════════════════════════════════════════════
 
-    int pow_blocks = sms * 4, pow_threads = 256;
-    int *d_pow_stop, *d_pow_slot;
-    unsigned long long *d_pow_perms, *d_pow_nonce;
-    int one = 1;
+    int pow_threads = 256;
 
     // Pre-allocate STARK buffers (shared across phases)
     StarkBufs sbufs = stark_bufs_alloc(log_trace);
     stark_prove_fast(&sbufs, 1, 1, s_stark);  // warm up
 
-    // ── Helper lambda for Pure PoW measurement ──
-    auto run_pure_pow = [&](const char* label) -> double {
-        CHECK(cudaMalloc(&d_pow_stop, sizeof(int)));
-        CHECK(cudaMalloc(&d_pow_perms, sizeof(unsigned long long)));
-        CHECK(cudaMalloc(&d_pow_nonce, sizeof(unsigned long long)));
-        CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
-        CHECK(cudaMemset(d_pow_stop, 0, sizeof(int)));
-        CHECK(cudaMemset(d_pow_perms, 0, sizeof(unsigned long long)));
+    // ── Batched PoW: same launch pattern as STARK Merkle ──
+    // One thread = one Poseidon2 perm, then exit.
+    // Batch size = LDE domain size (matches STARK kernel scale).
+    int lde_n_bench = 1 << (log_trace + LOG_BLOWUP);
+    int pow_batch = lde_n_bench;
+    int pow_batch_blocks = div_up(pow_batch, pow_threads);
 
-        k_pow<<<pow_blocks, pow_threads, 0, s_pow>>>(0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
+    // Pre-allocate PoW counters (reused across phases)
+    int *d_pow_found, *d_pow_slot;
+    uint32_t *d_pow_state;
+    CHECK(cudaMalloc(&d_pow_found, sizeof(int)));
+    CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
+    CHECK(cudaMalloc(&d_pow_state, W * sizeof(uint32_t)));
+
+    // ── Helper: batched Pure PoW measurement ──
+    auto run_pure_pow = [&](const char* label) -> double {
+        CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
+
+        // Warm up (1 batch)
+        k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
+            0, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
+        CHECK(cudaStreamSynchronize(s_pow));
+
+        uint64_t total_perms = 0;
+        uint64_t nonce = 0;
+        int launches = 0;
         double t0 = wall_time();
-        while (wall_time() - t0 < run_sec) usleep(50000);
-        CHECK(cudaMemcpy(d_pow_stop, &one, sizeof(int), cudaMemcpyHostToDevice));
+        while (wall_time() - t0 < run_sec) {
+            k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
+                nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
+            nonce += pow_batch;
+            total_perms += pow_batch;
+            launches++;
+            // Sync every 50 launches to pace host (matches STARK's ~1 sync/proof)
+            if (launches % 50 == 0) CHECK(cudaStreamSynchronize(s_pow));
+        }
         CHECK(cudaStreamSynchronize(s_pow));
         double elapsed = wall_time() - t0;
-
-        unsigned long long perms;
-        CHECK(cudaMemcpy(&perms, d_pow_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
-        double rate = perms / elapsed;
+        double rate = total_perms / elapsed;
 
         printf("\n── %s (%.1fs) ──────────────────────\n", label, run_sec);
-        printf("  Perms  : %s\n", fmt(perms, buf));
+        printf("  Batch  : %d perms/launch, %d blocks\n", pow_batch, pow_batch_blocks);
+        printf("  Launches: %d\n", launches);
+        printf("  Perms  : %s\n", fmt(total_perms, buf));
         printf("  Rate   : %.2f Mperm/s  (%.2f Mticket/s)\n", rate / 1e6, rate * 3 / 1e6);
 
-        cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
         return rate;
     };
 
@@ -1166,34 +1215,40 @@ int main(int argc, char** argv) {
 
     // ── Phase 3: Symbiotic (§4.1 — STARK Merkle + PoW concurrent) ──
     printf("\n── Phase 3: Symbiotic (%.1fs) ──────────────────\n", run_sec);
-    printf("  PoW    : %d blocks × %d threads (full GPU)\n", pow_blocks, pow_threads);
-    printf("  STARK  : pre-allocated, stream-concurrent\n");
+    printf("  PoW    : batched %d perms/launch (stream s_pow)\n", pow_batch);
+    printf("  STARK  : pre-allocated (stream s_stark)\n");
 
-    CHECK(cudaMalloc(&d_pow_stop, sizeof(int)));
-    CHECK(cudaMalloc(&d_pow_perms, sizeof(unsigned long long)));
-    CHECK(cudaMalloc(&d_pow_nonce, sizeof(unsigned long long)));
-    CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
-    CHECK(cudaMemset(d_pow_stop, 0, sizeof(int)));
-    CHECK(cudaMemset(d_pow_perms, 0, sizeof(unsigned long long)));
+    CHECK(cudaMemset(d_pow_found, 0, sizeof(int)));
 
-    k_pow<<<pow_blocks, pow_threads, 0, s_pow>>>(
-        0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
-
+    // Both streams run concurrently:
+    //   s_pow:   batched PoW launches (non-persistent)
+    //   s_stark: STARK proofs (pre-allocated)
     double tw0 = wall_time();
     uint64_t stark_perms_total = 0;
+    uint64_t sym_pow_perms = 0;
     int stark_count = 0;
+    int pow_launches = 0;
+    uint64_t pow_nonce = 0;
+
     while (wall_time() - tw0 < run_sec) {
+        // Interleave: launch PoW batches on s_pow, STARK proofs on s_stark
+        // Launch a few PoW batches per STARK proof (approximate ASIC per-cycle MUX)
         uint64_t p = stark_prove_fast(&sbufs, 200 + stark_count, 1, s_stark);
         stark_perms_total += p;
         stark_count++;
+
+        // While STARK was running, also launch PoW batches on s_pow
+        for (int b = 0; b < 5; b++) {
+            k_pow_batch<<<pow_batch_blocks, pow_threads, 0, s_pow>>>(
+                pow_nonce, pow_batch, d_pow_found, d_pow_slot, d_pow_state);
+            pow_nonce += pow_batch;
+            sym_pow_perms += pow_batch;
+            pow_launches++;
+        }
     }
-
-    CHECK(cudaMemcpy(d_pow_stop, &one, sizeof(int), cudaMemcpyHostToDevice));
     CHECK(cudaStreamSynchronize(s_pow));
+    CHECK(cudaStreamSynchronize(s_stark));
     double sym_elapsed = wall_time() - tw0;
-
-    unsigned long long sym_pow_perms;
-    CHECK(cudaMemcpy(&sym_pow_perms, d_pow_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
 
     uint64_t sym_total = sym_pow_perms + stark_perms_total;
     double sym_rate = sym_total / sym_elapsed;
@@ -1202,17 +1257,18 @@ int main(int argc, char** argv) {
     double f_sym = (double)stark_perms_total / sym_total;
     double u_avg = f_sym * 16.0 / 24.0;
 
-    printf("  PoW perms  : %s  (%.2f Mperm/s)\n", fmt(sym_pow_perms, buf), pow_only_rate / 1e6);
+    printf("  PoW perms  : %s  (%.2f Mperm/s, %d launches)\n",
+        fmt(sym_pow_perms, buf), pow_only_rate / 1e6, pow_launches);
     printf("  STARK perms: %s  (%.2f Mperm/s, %d proofs)\n",
         fmt(stark_perms_total, buf), stark_rate / 1e6, stark_count);
     printf("  Total      : %s  (%.2f Mperm/s, %.2f Mticket/s)\n",
         fmt(sym_total, buf), sym_rate / 1e6, sym_rate * 3 / 1e6);
 
-    cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
-
     // ── Phase 4: Pure PoW (after Symbiotic — verify baseline stability) ──
     double pure_pow_rate_post = run_pure_pow("Phase 4: Pure PoW (post)");
 
+    // Cleanup
+    cudaFree(d_pow_found); cudaFree(d_pow_slot); cudaFree(d_pow_state);
     stark_bufs_free(&sbufs);
 
     // Baseline = average of pre and post (accounts for thermal drift)
