@@ -1113,49 +1113,62 @@ int main(int argc, char** argv) {
     printf("\n  Poseidon2 time: %.1f%% (Merkle)\n", t_poseidon / avg.t_total * 100);
     printf("  M31/memory time: %.1f%% (FFT + quotient + FRI)\n", t_memory / avg.t_total * 100);
 
-    // ── Phase 2: Pure PoW baseline ──
-    printf("\n── Phase 2: Pure PoW Baseline (%.1fs) ──────────\n", run_sec);
+    // ═══════════════════════════════════════════════════════════════
+    // Phases 2–4: Hashrate Invariance Test (§4.4)
+    //
+    // Paper's claim: "Total PoW hashrate H is independent of operating mode."
+    //   ASIC model: single pipeline, per-cycle MUX (STARK/PoW) → H = constant
+    //   GPU test:   concurrent CUDA streams → H_sym ≈ H_pure?
+    //
+    // Each Poseidon2 perm produces 3 PoW tickets regardless of input source.
+    // "Ticket rate" = total perms/sec (PoW nonce + STARK Merkle combined).
+    // ═══════════════════════════════════════════════════════════════
 
     int pow_blocks = sms * 4, pow_threads = 256;
     int *d_pow_stop, *d_pow_slot;
     unsigned long long *d_pow_perms, *d_pow_nonce;
-    CHECK(cudaMalloc(&d_pow_stop, sizeof(int)));
-    CHECK(cudaMalloc(&d_pow_perms, sizeof(unsigned long long)));
-    CHECK(cudaMalloc(&d_pow_nonce, sizeof(unsigned long long)));
-    CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
-    CHECK(cudaMemset(d_pow_stop, 0, sizeof(int)));
-    CHECK(cudaMemset(d_pow_perms, 0, sizeof(unsigned long long)));
-
-    k_pow<<<pow_blocks, pow_threads, 0, s_pow>>>(0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
-    double tw0 = wall_time();
-    while (wall_time() - tw0 < run_sec) usleep(50000);
     int one = 1;
-    CHECK(cudaMemcpy(d_pow_stop, &one, sizeof(int), cudaMemcpyHostToDevice));
-    CHECK(cudaStreamSynchronize(s_pow));
-    double pow_elapsed = wall_time() - tw0;
 
-    unsigned long long pure_pow_perms;
-    CHECK(cudaMemcpy(&pure_pow_perms, d_pow_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
-    double pure_pow_rate = pure_pow_perms / pow_elapsed;
-
-    printf("Perms        : %s\n", fmt(pure_pow_perms, buf));
-    printf("Time         : %.3fs\n", pow_elapsed);
-    printf("Rate         : %.2f Mperm/s\n", pure_pow_rate / 1e6);
-
-    cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
-
-    // ── Phase 3: Symbiotic (STARK + PoW concurrent) ──
-    printf("\n── Phase 3: Symbiotic (STARK + PoW, %.1fs) ─────\n", run_sec);
-    printf("  PoW blocks : %d (same as Pure — full GPU)\n", pow_blocks);
-    printf("  STARK mode : pre-allocated (no cudaMalloc, no mid-sync)\n");
-
-    // Pre-allocate ALL STARK buffers BEFORE starting PoW
+    // Pre-allocate STARK buffers (shared across phases)
     StarkBufs sbufs = stark_bufs_alloc(log_trace);
-    // Warm up pre-alloc prover
-    stark_prove_fast(&sbufs, 1, 1, s_stark);
+    stark_prove_fast(&sbufs, 1, 1, s_stark);  // warm up
 
-    // Launch PoW on FULL GPU (same blocks as Phase 2)
-    // Both PoW and STARK compete for the same SMs — realistic scenario.
+    // ── Helper lambda for Pure PoW measurement ──
+    auto run_pure_pow = [&](const char* label) -> double {
+        CHECK(cudaMalloc(&d_pow_stop, sizeof(int)));
+        CHECK(cudaMalloc(&d_pow_perms, sizeof(unsigned long long)));
+        CHECK(cudaMalloc(&d_pow_nonce, sizeof(unsigned long long)));
+        CHECK(cudaMalloc(&d_pow_slot, sizeof(int)));
+        CHECK(cudaMemset(d_pow_stop, 0, sizeof(int)));
+        CHECK(cudaMemset(d_pow_perms, 0, sizeof(unsigned long long)));
+
+        k_pow<<<pow_blocks, pow_threads, 0, s_pow>>>(0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
+        double t0 = wall_time();
+        while (wall_time() - t0 < run_sec) usleep(50000);
+        CHECK(cudaMemcpy(d_pow_stop, &one, sizeof(int), cudaMemcpyHostToDevice));
+        CHECK(cudaStreamSynchronize(s_pow));
+        double elapsed = wall_time() - t0;
+
+        unsigned long long perms;
+        CHECK(cudaMemcpy(&perms, d_pow_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+        double rate = perms / elapsed;
+
+        printf("\n── %s (%.1fs) ──────────────────────\n", label, run_sec);
+        printf("  Perms  : %s\n", fmt(perms, buf));
+        printf("  Rate   : %.2f Mperm/s  (%.2f Mticket/s)\n", rate / 1e6, rate * 3 / 1e6);
+
+        cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
+        return rate;
+    };
+
+    // ── Phase 2: Pure PoW (before Symbiotic) ──
+    double pure_pow_rate_pre = run_pure_pow("Phase 2: Pure PoW (pre)");
+
+    // ── Phase 3: Symbiotic (§4.1 — STARK Merkle + PoW concurrent) ──
+    printf("\n── Phase 3: Symbiotic (%.1fs) ──────────────────\n", run_sec);
+    printf("  PoW    : %d blocks × %d threads (full GPU)\n", pow_blocks, pow_threads);
+    printf("  STARK  : pre-allocated, stream-concurrent\n");
+
     CHECK(cudaMalloc(&d_pow_stop, sizeof(int)));
     CHECK(cudaMalloc(&d_pow_perms, sizeof(unsigned long long)));
     CHECK(cudaMalloc(&d_pow_nonce, sizeof(unsigned long long)));
@@ -1166,9 +1179,7 @@ int main(int argc, char** argv) {
     k_pow<<<pow_blocks, pow_threads, 0, s_pow>>>(
         0, d_pow_stop, d_pow_perms, d_pow_nonce, d_pow_slot);
 
-    // Run STARK proofs on s_stark stream simultaneously
-    // Using pre-allocated prover: no cudaMalloc/Free, one sync per proof
-    tw0 = wall_time();
+    double tw0 = wall_time();
     uint64_t stark_perms_total = 0;
     int stark_count = 0;
     while (wall_time() - tw0 < run_sec) {
@@ -1177,7 +1188,6 @@ int main(int argc, char** argv) {
         stark_count++;
     }
 
-    // Stop PoW
     CHECK(cudaMemcpy(d_pow_stop, &one, sizeof(int), cudaMemcpyHostToDevice));
     CHECK(cudaStreamSynchronize(s_pow));
     double sym_elapsed = wall_time() - tw0;
@@ -1185,64 +1195,71 @@ int main(int argc, char** argv) {
     unsigned long long sym_pow_perms;
     CHECK(cudaMemcpy(&sym_pow_perms, d_pow_perms, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
 
-    // ── Separate reporting ──
-    double pow_only_rate = sym_pow_perms / sym_elapsed;
-    double stark_bonus_rate = stark_perms_total / sym_elapsed;
     uint64_t sym_total = sym_pow_perms + stark_perms_total;
     double sym_rate = sym_total / sym_elapsed;
+    double pow_only_rate = sym_pow_perms / sym_elapsed;
+    double stark_rate = stark_perms_total / sym_elapsed;
+    double f_sym = (double)stark_perms_total / sym_total;
+    double u_avg = f_sym * 16.0 / 24.0;
 
-    double pow_degradation = (1.0 - pow_only_rate / pure_pow_rate) * 100;
-    double net_overhead = (1.0 - sym_rate / pure_pow_rate) * 100;
-
-    printf("\n  PoW-only   : %s perms → %.2f Mperm/s\n",
-        fmt(sym_pow_perms, buf), pow_only_rate / 1e6);
-    printf("  STARK bonus: %s perms → %.2f Mperm/s  (%d proofs)\n",
-        fmt(stark_perms_total, buf), stark_bonus_rate / 1e6, stark_count);
-    printf("  Combined   : %s perms → %.2f Mperm/s\n",
-        fmt(sym_total, buf), sym_rate / 1e6);
-    printf("\n  PoW degradation : %.1f%%  (cost of running STARK)\n", pow_degradation);
-    printf("  STARK recovery  : +%.2f Mperm/s  (Merkle tickets)\n", stark_bonus_rate / 1e6);
-    printf("  Net overhead    : %.1f%%\n", net_overhead);
-
-    double f_sym = (double)stark_perms_total / sym_total * 100;
-    printf("  f_sym (ZK frac) : %.1f%%\n", f_sym);
+    printf("  PoW perms  : %s  (%.2f Mperm/s)\n", fmt(sym_pow_perms, buf), pow_only_rate / 1e6);
+    printf("  STARK perms: %s  (%.2f Mperm/s, %d proofs)\n",
+        fmt(stark_perms_total, buf), stark_rate / 1e6, stark_count);
+    printf("  Total      : %s  (%.2f Mperm/s, %.2f Mticket/s)\n",
+        fmt(sym_total, buf), sym_rate / 1e6, sym_rate * 3 / 1e6);
 
     cudaFree(d_pow_stop); cudaFree(d_pow_perms); cudaFree(d_pow_nonce); cudaFree(d_pow_slot);
+
+    // ── Phase 4: Pure PoW (after Symbiotic — verify baseline stability) ──
+    double pure_pow_rate_post = run_pure_pow("Phase 4: Pure PoW (post)");
+
     stark_bufs_free(&sbufs);
 
-    // ── Summary ──
+    // Baseline = average of pre and post (accounts for thermal drift)
+    double pure_pow_rate = (pure_pow_rate_pre + pure_pow_rate_post) / 2.0;
+    double baseline_spread = fabs(pure_pow_rate_pre - pure_pow_rate_post) / pure_pow_rate * 100;
+
+    // ═══════════════════════════════════════════════════════════════
+    // Summary — aligned with paper §4.4, §4.6, §A.5
+    // ═══════════════════════════════════════════════════════════════
     printf("\n════════════════════════════════════════════════════\n");
-    printf("RESULTS SUMMARY (trace=2^%d, diff=%d)\n", log_trace, difficulty);
-    printf("────────────────────────────────────────────────────\n");
-    printf("STARK proof  : %8.2f ms/proof (%s Poseidon2 perms)\n",
+    printf("RESULTS — §4.4 Hashrate Invariance Test\n");
+    printf("════════════════════════════════════════════════════\n");
+    printf("STARK proof    : %6.2f ms/proof  (%s Poseidon2 perms)\n",
         avg.t_total * 1e3, fmt(avg.poseidon_perms, buf));
-    printf("  Poseidon2  : %5.1f%% of proof time (Merkle trees)\n",
+    printf("  Poseidon2    : %5.1f%%  (Merkle trees — ticket-producing)\n",
         t_poseidon / avg.t_total * 100);
-    printf("  Memory ops : %5.1f%% of proof time (FFT/quotient/FRI)\n",
+    printf("  Memory-bound : %5.1f%%  (FFT/quotient/FRI — no tickets)\n",
         t_memory / avg.t_total * 100);
     printf("────────────────────────────────────────────────────\n");
-    printf("Pure PoW     : %8.2f Mperm/s  (baseline)\n", pure_pow_rate / 1e6);
-    printf("Sym PoW-only : %8.2f Mperm/s  (%.1f%% of baseline)\n",
-        pow_only_rate / 1e6, pow_only_rate / pure_pow_rate * 100);
-    printf("STARK bonus  : %8.2f Mperm/s  (Merkle tickets)\n", stark_bonus_rate / 1e6);
-    printf("Sym combined : %8.2f Mperm/s  (%.1f%% of baseline)\n",
-        sym_rate / 1e6, sym_rate / pure_pow_rate * 100);
-    printf("────────────────────────────────────────────────────\n");
-    printf("PoW degradation    : %.1f%%  (STARK steals this from PoW)\n", pow_degradation);
-    printf("STARK recovery     : +%.2f Mperm/s\n", stark_bonus_rate / 1e6);
-    printf("Net overhead       : %.1f%%  (combined vs baseline)\n", net_overhead);
-    printf("f_sym (ZK frac)    : %.1f%%\n", f_sym);
+    printf("Pure PoW (avg) : %6.2f Mperm/s  (%6.2f Mticket/s)\n",
+        pure_pow_rate / 1e6, pure_pow_rate * 3 / 1e6);
+    printf("  pre/post     : %.2f / %.2f Mperm/s  (spread %.1f%%)\n",
+        pure_pow_rate_pre / 1e6, pure_pow_rate_post / 1e6, baseline_spread);
+    printf("Symbiotic      : %6.2f Mperm/s  (%6.2f Mticket/s)\n",
+        sym_rate / 1e6, sym_rate * 3 / 1e6);
+    printf("  PoW portion  : %6.2f Mperm/s\n", pow_only_rate / 1e6);
+    printf("  STARK Merkle : %6.2f Mperm/s  (%d proofs)\n", stark_rate / 1e6, stark_count);
     printf("────────────────────────────────────────────────────\n");
 
-    if (net_overhead <= 10.0)
-        printf("VERDICT : Complementary bottleneck CONFIRMED (net <=10%% overhead)\n");
-    else if (net_overhead <= 30.0)
-        printf("VERDICT : Partial complementarity (net %.0f%% overhead)\n", net_overhead);
+    // §4.4: Hashrate ratio (paper predicts ≈1.0, GPU may exceed due to parallelism)
+    double hashrate_ratio = sym_rate / pure_pow_rate;
+    printf("Hashrate ratio : %.3f  (§4.4 predicts ≥1.0)\n", hashrate_ratio);
+
+    // §A.5: f_sym and U_avg
+    printf("f_sym          : %.1f%%  (§A.5: STARK fraction of total perms)\n", f_sym * 100);
+    printf("U_avg          : %.1f%%  (f_sym × U, U=16/24≈67%%)\n", u_avg * 100);
+    printf("────────────────────────────────────────────────────\n");
+
+    if (hashrate_ratio >= 0.95)
+        printf("§4.4 CONFIRMED : Hashrate invariance holds (ratio %.3f ≥ 0.95)\n", hashrate_ratio);
+    else if (hashrate_ratio >= 0.80)
+        printf("§4.4 PARTIAL   : Mild interference (ratio %.3f)\n", hashrate_ratio);
     else
-        printf("VERDICT : Bottleneck NOT complementary (net %.0f%% overhead)\n", net_overhead);
+        printf("§4.4 VIOLATED  : Significant interference (ratio %.3f)\n", hashrate_ratio);
 
-    if (pow_degradation > 5.0)
-        printf("NOTE    : PoW rate dropped %.1f%% — STARK does consume GPU resources\n", pow_degradation);
+    if (baseline_spread > 10.0)
+        printf("WARNING : Baseline unstable (%.1f%% spread) — results unreliable\n", baseline_spread);
 
     printf("════════════════════════════════════════════════════\n");
 
