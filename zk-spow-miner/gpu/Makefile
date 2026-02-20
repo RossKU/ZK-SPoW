@@ -3,7 +3,7 @@
 #
 # Targets:
 #   make bench          # Poseidon2 throughput benchmark (Pure PoW vs Merkle vs Symbiotic)
-#   make stark          # Full GPU STARK prover + symbiotic benchmark
+#   make stark          # GPU STARK prover + ZK-SPoW validation (Test 1 + Test 2)
 #   make all            # build both
 #
 # Options:
@@ -13,8 +13,8 @@
 #
 # Run:
 #   ./bench [difficulty] [log_array_size] [seconds]
-#   ./stark [log_trace] [difficulty] [seconds]
-#   ./stark sweep [difficulty] [seconds]
+#   ./stark [log_trace] [seconds]
+#   ./stark sweep [seconds]
 
 NVCC ?= nvcc
 ARCH ?= sm_80
@@ -33,10 +33,10 @@ run-bench: bench
 	./bench 24 22 5
 
 run-stark: stark
-	./stark 16 24 5
+	./stark 16 5
 
 run-sweep: stark
-	./stark sweep 24 3
+	./stark sweep 3
 
 clean:
 	rm -f bench stark
