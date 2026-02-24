@@ -172,7 +172,7 @@ Three approaches to integrate header digest into the Merkle hash:
 |--------|-------|------|-------------|----------|-------------|------------|
 | A: Header re-hash | 16 | Sponge | 2 | 4 | 0% | 0% |
 | B: Width 20 | 20 | Compression | 1 | 1 | +22% | ~+11% |
-| **C: Width 24** | **24** | **Compression** | **1** | **1** | **+44–105%** | **~+22–50%** |
+| **C: Width 24** | **24** | **Compression** | **1** | **1** | **+44–105%** | **approx. +22–50%** |
 
 **Design A:** No Poseidon2 modification. Standard width-16 sponge Merkle hash (2 permutations: absorb left\_child, absorb right\_child). To bind the header for PoW, a *second* sponge hash is required: sponge(merkle\_parent, header\_digest) → pow\_hash (2 additional permutations). Total: **4 permutations per PoW draw**, vs 1 for compression function mode. The STARK tree itself is unmodified (2 perm/node), but each PoW draw doubles the permutation cost.
 
@@ -204,7 +204,7 @@ Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 
 Internal round MDS scales as O(t), not O(t²), because the sparse MDS structure (diagonal + rank-1) requires only t multiplications per round. This makes the width extension significantly cheaper than for standard Poseidon.
 
-**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** The datapath widens by 50% (24/16), and Width-24 requires R\_p = 22 internal rounds vs Width-16's R\_p = 14 (§6.3), adding +36% pipeline depth (30 vs 22 total rounds). In an iterative (round-reuse) design, core area increases by ~+50% (width only) with 36% more cycles per hash. In a fully pipelined design, core area approximately doubles. Total die area impact: **~+22% to ~+50%** depending on implementation (Poseidon2 is 50% of die; see Appendix A). The usefulness cost is U = t₀/t = 16/24 ≈ 67% — the 33% overhead per permutation serves PoW integration, not ZK computation.
+**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** The datapath widens by 50% (24/16), and Width-24 requires R\_p = 22 internal rounds vs Width-16's R\_p = 14 (§6.3), adding +36% pipeline depth (30 vs 22 total rounds). In an iterative (round-reuse) design, core area increases by approximately +50% (width only) with 36% more cycles per hash. In a fully pipelined design, core area approximately doubles. Total die area impact: **approximately +22% to +50%** depending on implementation (Poseidon2 is 50% of die; see Appendix A). The usefulness cost is U = t₀/t = 16/24 ≈ 67% — the 33% overhead per permutation serves PoW integration, not ZK computation.
 
 #### 3.2.4 Compression Function vs Sponge
 
