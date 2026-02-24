@@ -441,7 +441,7 @@ Every Poseidon2 invocation in the STARK computation simultaneously:
 \item \textbf{(a)} Advances the ZK proof (economic value---the useful work that drives the permutation)
 \item \textbf{(b)} Produces PoW tickets (network security---mathematical byproduct of the same permutation)
 \end{itemize}
-GPU validation confirms up to 144.54M free tickets/s from STARK proof generation at zero additional cost (Appendix~\ref{sec:gpu-freetickets}).
+GPU validation confirms up to 136.39M free tickets/s from STARK proof generation at zero additional cost (Appendix~\ref{sec:gpu-freetickets}).
 
 The miner does not choose the Merkle inputs $(n_L, n_R)$---they are determined by the STARK computation. The ``random exploration'' required for PoW occurs naturally because STARK Merkle tree hashes are pseudorandom from the miner's perspective.
 
@@ -492,7 +492,7 @@ Total PoW hashrate $\mathcal{H}$ is independent of the operating mode.
 $\mathcal{H} = N_{\mathrm{cores}} \times \mathrm{throughput\_per\_core}$. Each core's throughput is 1~hash per $\mathrm{pipeline\_depth}$ cycles (fully pipelined), regardless of whether the input is a STARK Merkle pair or a random nonce. Input MUX adds zero latency (combinational logic). Therefore $\mathcal{H}$ is constant across Symbiotic, Pure PoW, and any mixed state.
 \end{proof}
 
-\textbf{GPU validation.} This premise---that Poseidon2 throughput is invariant to input content---is empirically confirmed on GPU: batched Poseidon2 with random nonce inputs (register-only, simulating Pure PoW) and with structured Merkle inputs (global memory read/write, simulating Symbiotic mode) achieve a throughput ratio of 101.9\% (Appendix~\ref{sec:gpu-invariance}). The observed ${\sim}2\%$ gap is attributable to GPU thermal throttling and clock frequency fluctuation, not input-dependent computation. The Poseidon2 permutation itself---30 rounds of identical arithmetic regardless of state values---is input-independent by construction.
+\textbf{GPU validation.} This premise---that Poseidon2 throughput is invariant to input content---is empirically confirmed on GPU: batched Poseidon2 with random nonce inputs (register-only, simulating Pure PoW) and with structured Merkle inputs (global memory read/write, simulating Symbiotic mode) achieve a mean throughput ratio of $99.3\% \pm 0.3\%$ across 10 runs with alternating execution order (95\% CI: $[99.1\%, 99.5\%]$; Appendix~\ref{sec:gpu-invariance}). The 0.7\% gap is attributable to GPU global memory I/O overhead in the Merkle kernel, not input-dependent computation. On an ASIC with on-chip SRAM (${\sim}1$ cycle latency), this overhead vanishes. The Poseidon2 permutation itself---30 rounds of identical arithmetic regardless of state values---is input-independent by construction.
 
 \subsection{Difficulty Independence}
 
@@ -713,7 +713,7 @@ Ofelimos~\cite{ofelimos} is the closest prior work, using SNARK proofs as useful
 
 \item \textbf{ZK market maturity.} The economic advantage of ZK-SPoW over Pure PoW depends on sufficient ZK proof demand. The timeline for this market to develop is uncertain and requires dedicated economic modeling.
 
-\item \textbf{Complementary bottleneck validation (partially resolved).} The input independence premise of \S\ref{sec:modes}---that Poseidon2 throughput is invariant to whether the input is a random nonce or structured Merkle data---is validated on GPU with a throughput ratio of 101.9\% across 10 runs (Appendix~\ref{sec:gpu-invariance}), and free ticket generation from STARK computation reaches up to 144.54M tickets/s (Appendix~\ref{sec:gpu-freetickets}). However, GPUs can freely schedule ZK and PoW workloads in software, so the ASIC-specific claim that compute-bound PoW and memory-bound STARK execute simultaneously on a shared Poseidon2 pipeline (\S\ref{sec:bottleneck}) cannot be validated on GPU. Full validation of the complementary bottleneck structure requires ASIC implementation.
+\item \textbf{Complementary bottleneck validation (partially resolved).} The input independence premise of \S\ref{sec:modes}---that Poseidon2 throughput is invariant to whether the input is a random nonce or structured Merkle data---is validated on GPU with a mean throughput ratio of $99.3\% \pm 0.3\%$ across 10 runs with alternating execution order (paired $t$-test: $p{=}0.006$; Appendix~\ref{sec:gpu-invariance}), and free ticket generation from STARK computation reaches up to 136.39M tickets/s (Appendix~\ref{sec:gpu-freetickets}). However, GPUs can freely schedule ZK and PoW workloads in software, so the ASIC-specific claim that compute-bound PoW and memory-bound STARK execute simultaneously on a shared Poseidon2 pipeline (\S\ref{sec:bottleneck}) cannot be validated on GPU. Full validation of the complementary bottleneck structure requires ASIC implementation.
 
 \item[\textbf{Resolved.}] Triple-ticket independence and trace grinding resistance are resolved under the PRP assumption. See Appendix~\ref{app:triple-ticket} and Appendix~\ref{app:tracegrinding}.
 \end{enumerate}
@@ -1221,14 +1221,14 @@ We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA---iCFFT/C
 \toprule
 $k$ & Trace & STARK (ms) & Merkle perms & Proofs/s & Free tickets/s \\
 \midrule
-8 & 256 & 2.10 & 374 & 475.8 & 533.9K \\
-10 & 1{,}024 & 2.87 & 1.5K & 348.2 & 1.59M \\
-12 & 4{,}096 & 4.01 & 6.1K & 249.6 & 4.59M \\
-14 & 16{,}384 & 6.21 & 24.6K & 161.2 & 11.87M \\
-16 & 65{,}536 & 8.49 & 98.3K & 117.8 & 34.72M \\
-18 & 262{,}144 & 13.06 & 393.2K & 76.6 & 90.32M \\
-20 & 1{,}048{,}576 & 32.64 & 1.57M & 30.6 & 144.54M \\
-22 & 4{,}194{,}304 & 164.18 & 6.29M & 6.1 & 114.96M \\
+8 & 256 & 2.30 & 374 & 434.8 & 487.8K \\
+10 & 1{,}024 & 3.19 & 1.5K & 313.7 & 1.43M \\
+12 & 4{,}096 & 4.20 & 6.1K & 238.2 & 4.38M \\
+14 & 16{,}384 & 5.75 & 24.6K & 173.8 & 12.80M \\
+16 & 65{,}536 & 8.41 & 98.3K & 118.9 & 35.06M \\
+18 & 262{,}144 & 13.65 & 393.2K & 73.3 & 86.41M \\
+20 & 1{,}048{,}576 & 34.60 & 1.57M & 28.9 & 136.39M \\
+22 & 4{,}194{,}304 & 163.48 & 6.29M & 6.1 & 115.46M \\
 \bottomrule
 \end{tabular}
 \caption{Free PoW ticket throughput from STARK proof generation. Each Merkle permutation produces 3~PoW tickets.}
@@ -1237,7 +1237,7 @@ $k$ & Trace & STARK (ms) & Merkle perms & Proofs/s & Free tickets/s \\
 
 \textbf{Interpretation.} Poseidon2 computation is input-independent (confirmed in \S\ref{sec:gpu-invariance}: ratio $99.3\% \pm 0.3\%$, $p{=}0.006$; the 0.7\% gap is GPU memory I/O, not algorithmic). Whether $S[16..23]$ carries $\mathit{header\_digest}$ or zeros, the same 30-round permutation executes. STARK proof time does not change with or without header binding. Pure ZK (Width-16) structurally lacks header binding and produces 0~PoW tickets. ZK-SPoW converts all Merkle hashes into PoW tickets at zero marginal cost.
 
-Peak throughput occurs at $k = 20$ (trace size $2^{20}$): 144.54M free tickets/s. At $k = 22$, STARK overhead (NTT, constraint evaluation) dominates, reducing proofs/s to 6.1 and tickets/s to 114.96M. The optimal operating point depends on the ZK workload mix.
+Peak throughput occurs at $k = 20$ (trace size $2^{20}$): 136.39M free tickets/s. At $k = 22$, STARK overhead (NTT, constraint evaluation) dominates, reducing proofs/s to 6.1 and tickets/s to 115.46M. The optimal operating point depends on the ZK workload mix.
 
 \subsection{Input Independence}
 \label{sec:gpu-invariance}
