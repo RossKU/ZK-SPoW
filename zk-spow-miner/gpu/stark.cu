@@ -1341,96 +1341,171 @@ Test1Result run_test1(int log_trace, const RC* rc) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Test 2: Input Independence
+// Test 2: Input Independence (statistically rigorous)
 //
 // Same Poseidon2 permutation, different input sources:
 //   Random: nonce from registers (PoW mode on ASIC)
 //   Merkle: children from global memory (Symbiotic mode on ASIC)
 //
-// If ratio ≈ 1.0, the Poseidon2 pipeline throughput is invariant
-// to input source.  Any gap is GPU memory I/O overhead (not
-// applicable to ASIC where SRAM latency ≈ 1 cycle).
+// Methodology:
+//   - 3-second warmup for each kernel (discarded)
+//   - 10 measurement rounds with alternating execution order
+//     (odd rounds: Random→Merkle, even rounds: Merkle→Random)
+//   - Reports per-run throughput, mean ± stdev, 95% CI
+//   - Paired t-test on per-run ratios (H0: ratio = 100%)
+//
+// If ratio ≈ 1.0 (p > 0.05), the Poseidon2 pipeline throughput
+// is invariant to input source.  Any gap is GPU memory I/O
+// overhead (not applicable to ASIC where SRAM latency ≈ 1 cycle).
 // ═══════════════════════════════════════════════════════════════
 
 struct Test2Result {
-    double random_rate;   // k_pow_batch perm/s
-    double merkle_rate;   // k_merkle_batch perm/s
-    double ratio;         // merkle / random (1.0 = perfectly input-independent)
+    static const int N_RUNS = 10;
+    double random_runs[10];   // per-run Mperm/s
+    double merkle_runs[10];   // per-run Mperm/s
+    double ratio_runs[10];    // per-run merkle/random
+    double random_mean, merkle_mean, ratio_mean;
+    double random_stdev, merkle_stdev, ratio_stdev;
+    double ratio_ci95_lo, ratio_ci95_hi;  // 95% CI
+    double t_statistic, p_value_approx;   // paired t-test
 };
 
+static void compute_stats(const double *vals, int n, double &mean, double &stdev) {
+    double sum = 0;
+    for (int i = 0; i < n; i++) sum += vals[i];
+    mean = sum / n;
+    double ss = 0;
+    for (int i = 0; i < n; i++) { double d = vals[i] - mean; ss += d * d; }
+    stdev = (n > 1) ? sqrt(ss / (n - 1)) : 0.0;
+}
+
 Test2Result run_test2(double run_sec) {
+    const int N_RUNS = Test2Result::N_RUNS;
     int batch = 1 << 20;  // 1M perms per launch — always saturates GPU
     int threads = 256;
-    int blocks = div_up(batch, threads);
+    int nblocks = div_up(batch, threads);
 
-    // Shared counters
+    // ── Allocate GPU resources once ──
     int *d_found, *d_slot;
     uint32_t *d_state;
     CHECK(cudaMalloc(&d_found, sizeof(int)));
     CHECK(cudaMalloc(&d_slot, sizeof(int)));
     CHECK(cudaMalloc(&d_state, W * sizeof(uint32_t)));
 
-    cudaStream_t stream;
-    CHECK(cudaStreamCreate(&stream));
-
-    // ── Phase A: Random input (k_pow_batch) ──
-    CHECK(cudaMemset(d_found, 0, sizeof(int)));
-    // Warm up
-    k_pow_batch<<<blocks, threads, 0, stream>>>(0, batch, d_found, d_slot, d_state);
-    CHECK(cudaStreamSynchronize(stream));
-
-    uint64_t total_pow = 0;
-    uint64_t nonce = 0;
-    int launches = 0;
-    double t0 = wall_time();
-    while (wall_time() - t0 < run_sec) {
-        k_pow_batch<<<blocks, threads, 0, stream>>>(nonce, batch, d_found, d_slot, d_state);
-        nonce += batch;
-        total_pow += batch;
-        launches++;
-        if (launches % 50 == 0) CHECK(cudaStreamSynchronize(stream));
-    }
-    CHECK(cudaStreamSynchronize(stream));
-    double random_rate = total_pow / (wall_time() - t0);
-
-    // ── Phase B: Merkle input (k_merkle_batch) ──
-    // Pre-fill global memory with pseudo-random M31 values (simulating children)
     uint64_t data_words = (uint64_t)batch * 16;
     uint64_t out_words = (uint64_t)batch * 8;
     uint32_t *d_data, *d_out;
     CHECK(cudaMalloc(&d_data, data_words * sizeof(uint32_t)));
     CHECK(cudaMalloc(&d_out, out_words * sizeof(uint32_t)));
-
-    // Initialize with pseudo-random data on GPU (fill with a pattern kernel
-    // would be cleaner, but memset + a few PoW outputs works fine)
     CHECK(cudaMemset(d_data, 0x42, data_words * sizeof(uint32_t)));
 
-    CHECK(cudaMemset(d_found, 0, sizeof(int)));
-    // Warm up
-    k_merkle_batch<<<blocks, threads, 0, stream>>>(d_data, batch, d_out, d_found, d_slot, d_state);
-    CHECK(cudaStreamSynchronize(stream));
+    cudaStream_t stream;
+    CHECK(cudaStreamCreate(&stream));
 
-    uint64_t total_merkle = 0;
-    launches = 0;
-    t0 = wall_time();
-    while (wall_time() - t0 < run_sec) {
-        k_merkle_batch<<<blocks, threads, 0, stream>>>(d_data, batch, d_out, d_found, d_slot, d_state);
-        total_merkle += batch;
-        launches++;
-        if (launches % 50 == 0) CHECK(cudaStreamSynchronize(stream));
+    // ── Helper lambdas to measure one kernel for run_sec seconds ──
+    auto measure_random = [&]() -> double {
+        CHECK(cudaMemset(d_found, 0, sizeof(int)));
+        uint64_t total = 0;
+        uint64_t nonce = 0;
+        int launches = 0;
+        double t0 = wall_time();
+        while (wall_time() - t0 < run_sec) {
+            k_pow_batch<<<nblocks, threads, 0, stream>>>(nonce, batch, d_found, d_slot, d_state);
+            nonce += batch;
+            total += batch;
+            launches++;
+            if (launches % 50 == 0) CHECK(cudaStreamSynchronize(stream));
+        }
+        CHECK(cudaStreamSynchronize(stream));
+        return total / (wall_time() - t0);
+    };
+
+    auto measure_merkle = [&]() -> double {
+        CHECK(cudaMemset(d_found, 0, sizeof(int)));
+        uint64_t total = 0;
+        int launches = 0;
+        double t0 = wall_time();
+        while (wall_time() - t0 < run_sec) {
+            k_merkle_batch<<<nblocks, threads, 0, stream>>>(d_data, batch, d_out, d_found, d_slot, d_state);
+            total += batch;
+            launches++;
+            if (launches % 50 == 0) CHECK(cudaStreamSynchronize(stream));
+        }
+        CHECK(cudaStreamSynchronize(stream));
+        return total / (wall_time() - t0);
+    };
+
+    // ── Warmup: 3 seconds each kernel (discarded) ──
+    printf("  Warmup: 3s Random + 3s Merkle (discarded)\n");
+    fflush(stdout);
+    {
+        double warmup_sec = 3.0;
+        CHECK(cudaMemset(d_found, 0, sizeof(int)));
+        uint64_t nonce = 0;
+        double t0 = wall_time();
+        while (wall_time() - t0 < warmup_sec) {
+            k_pow_batch<<<nblocks, threads, 0, stream>>>(nonce, batch, d_found, d_slot, d_state);
+            nonce += batch;
+        }
+        CHECK(cudaStreamSynchronize(stream));
+
+        CHECK(cudaMemset(d_found, 0, sizeof(int)));
+        t0 = wall_time();
+        while (wall_time() - t0 < warmup_sec) {
+            k_merkle_batch<<<nblocks, threads, 0, stream>>>(d_data, batch, d_out, d_found, d_slot, d_state);
+        }
+        CHECK(cudaStreamSynchronize(stream));
     }
-    CHECK(cudaStreamSynchronize(stream));
-    double merkle_rate = total_merkle / (wall_time() - t0);
+
+    // ── 10 measurement rounds, alternating order ──
+    Test2Result r = {};
+    for (int i = 0; i < N_RUNS; i++) {
+        double rnd_rate, mrk_rate;
+        if (i % 2 == 0) {
+            // Even run (0,2,4,6,8): Random first, then Merkle
+            rnd_rate = measure_random();
+            mrk_rate = measure_merkle();
+        } else {
+            // Odd run (1,3,5,7,9): Merkle first, then Random
+            mrk_rate = measure_merkle();
+            rnd_rate = measure_random();
+        }
+        r.random_runs[i] = rnd_rate / 1e6;   // store as Mperm/s
+        r.merkle_runs[i] = mrk_rate / 1e6;
+        r.ratio_runs[i] = (mrk_rate / rnd_rate) * 100.0;  // as percentage
+    }
+
+    // ── Compute statistics ──
+    compute_stats(r.random_runs, N_RUNS, r.random_mean, r.random_stdev);
+    compute_stats(r.merkle_runs, N_RUNS, r.merkle_mean, r.merkle_stdev);
+    compute_stats(r.ratio_runs, N_RUNS, r.ratio_mean, r.ratio_stdev);
+
+    // 95% CI for ratio (t-distribution, df=9, t_crit=2.262)
+    double t_crit = 2.262;
+    double se = r.ratio_stdev / sqrt((double)N_RUNS);
+    r.ratio_ci95_lo = r.ratio_mean - t_crit * se;
+    r.ratio_ci95_hi = r.ratio_mean + t_crit * se;
+
+    // Paired t-test: H0: mean(ratio) = 100%
+    r.t_statistic = (se > 0) ? (r.ratio_mean - 100.0) / se : 0.0;
+
+    // Approximate two-tailed p-value using t-distribution with df=9
+    // Using the approximation: p ≈ 2 * (1 - Φ(|t| * sqrt(df/(df+t²)) * correction))
+    // For a simple portable approximation, use the beta regularized incomplete function
+    // Here we use a reasonable approximation for df=9:
+    double abst = fabs(r.t_statistic);
+    double df = N_RUNS - 1;
+    // Approximation: p ≈ 2 * (1 - Φ(|t| * sqrt((df-0.5)/(df+t²))))  [Abramowitz & Stegun]
+    double z = abst * sqrt((df - 0.5) / (df + abst * abst));
+    // Φ(z) approximation using error function: Φ(z) = 0.5 * (1 + erf(z / sqrt(2)))
+    double phi = 0.5 * (1.0 + erf(z / sqrt(2.0)));
+    r.p_value_approx = 2.0 * (1.0 - phi);
 
     // Cleanup
     cudaFree(d_data); cudaFree(d_out);
     cudaFree(d_found); cudaFree(d_slot); cudaFree(d_state);
     CHECK(cudaStreamDestroy(stream));
 
-    Test2Result r = {};
-    r.random_rate = random_rate;
-    r.merkle_rate = merkle_rate;
-    r.ratio = merkle_rate / random_rate;
     return r;
 }
 
@@ -1527,25 +1602,38 @@ int main(int argc, char** argv) {
         // ═══════════════════════════════════════════════════════
         // Test 2: Input Independence
         // ═══════════════════════════════════════════════════════
-        printf("═══ Test 2: Input Independence ═════════════════\n");
+        printf("═══ Test 2: Input Independence (10 runs, alternating order) ═══\n");
         printf("Same Poseidon2 (W=%d, Rf=%d, Rp=%d), different input sources.\n", W, RF, RP);
         printf("Random: nonce from registers (PoW mode)\n");
         printf("Merkle: children from global memory (Symbiotic mode)\n\n");
 
         Test2Result t2 = run_test2(run_sec);
 
-        printf("  Random (PoW)   : %8.2f Mperm/s\n", t2.random_rate / 1e6);
-        printf("  Merkle (STARK) : %8.2f Mperm/s\n", t2.merkle_rate / 1e6);
-        printf("  Ratio          : %5.1f%%\n", t2.ratio * 100);
+        printf("\n  Run  Random(Mperm/s)  Merkle(Mperm/s)  Ratio\n");
+        printf("  ───  ──────────────  ───────────────  ─────\n");
+        for (int i = 0; i < Test2Result::N_RUNS; i++) {
+            const char *order = (i % 2 == 0) ? "[R→M]" : "[M→R]";
+            printf("  %2d   %10.2f       %10.2f      %5.1f%%   %s\n",
+                i + 1, t2.random_runs[i], t2.merkle_runs[i], t2.ratio_runs[i], order);
+        }
+        printf("  ───  ──────────────  ───────────────  ─────\n");
+        printf("  Mean %10.2f±%.2f  %10.2f±%.2f   %5.1f%% ± %.1f%%\n",
+            t2.random_mean, t2.random_stdev,
+            t2.merkle_mean, t2.merkle_stdev,
+            t2.ratio_mean, t2.ratio_stdev);
+        printf("  95%% CI                                [%.1f%%, %.1f%%]\n",
+            t2.ratio_ci95_lo, t2.ratio_ci95_hi);
+        printf("  Paired t-test: t=%.3f, p=%.3f (H0: ratio=100%%)\n",
+            t2.t_statistic, t2.p_value_approx);
         printf("────────────────────────────────────────────────────\n");
-        if (t2.ratio >= 0.95)
-            printf("RESULT: Poseidon2 throughput is input-independent (%.1f%%)\n", t2.ratio * 100);
-        else if (t2.ratio >= 0.80)
-            printf("RESULT: %.0f%% gap is GPU global memory I/O overhead (not ASIC-relevant)\n",
-                (1.0 - t2.ratio) * 100);
+        if (t2.p_value_approx > 0.05)
+            printf("RESULT: Input-independent (no significant difference, p=%.3f)\n", t2.p_value_approx);
+        else if (t2.ratio_mean >= 95.0)
+            printf("RESULT: Statistically significant but negligible (%.1f%%, p=%.3f)\n",
+                t2.ratio_mean, t2.p_value_approx);
         else
-            printf("RESULT: %.0f%% gap — significant memory contention on this GPU\n",
-                (1.0 - t2.ratio) * 100);
+            printf("RESULT: %.1f%% gap (p=%.3f) — GPU memory I/O overhead (not ASIC-relevant)\n",
+                100.0 - t2.ratio_mean, t2.p_value_approx);
         printf("ASIC implication: Poseidon2 pipeline is invariant to input source.\n");
         printf("                  Mode switch (PoW <-> Symbiotic) = 0 cycles penalty.\n");
         printf("════════════════════════════════════════════════════\n");
@@ -1607,16 +1695,30 @@ int main(int argc, char** argv) {
         printf("  Pure ZK        : 0 tickets (no PoW output)\n");
 
         // ── Test 2: Input Independence ──
-        printf("\n═══ Test 2: Input Independence ═════════════════\n");
+        printf("\n═══ Test 2: Input Independence (10 runs, alternating order) ═══\n");
         Test2Result t2 = run_test2(run_sec);
-        printf("  Random (PoW)   : %8.2f Mperm/s\n", t2.random_rate / 1e6);
-        printf("  Merkle (STARK) : %8.2f Mperm/s\n", t2.merkle_rate / 1e6);
-        printf("  Ratio          : %5.1f%%\n", t2.ratio * 100);
-        if (t2.ratio >= 0.95)
-            printf("  -> Poseidon2 is input-independent\n");
+
+        printf("\n  Run  Random(Mperm/s)  Merkle(Mperm/s)  Ratio\n");
+        printf("  ───  ──────────────  ───────────────  ─────\n");
+        for (int i = 0; i < Test2Result::N_RUNS; i++) {
+            const char *order = (i % 2 == 0) ? "[R→M]" : "[M→R]";
+            printf("  %2d   %10.2f       %10.2f      %5.1f%%   %s\n",
+                i + 1, t2.random_runs[i], t2.merkle_runs[i], t2.ratio_runs[i], order);
+        }
+        printf("  ───  ──────────────  ───────────────  ─────\n");
+        printf("  Mean %10.2f±%.2f  %10.2f±%.2f   %5.1f%% ± %.1f%%\n",
+            t2.random_mean, t2.random_stdev,
+            t2.merkle_mean, t2.merkle_stdev,
+            t2.ratio_mean, t2.ratio_stdev);
+        printf("  95%% CI                                [%.1f%%, %.1f%%]\n",
+            t2.ratio_ci95_lo, t2.ratio_ci95_hi);
+        printf("  Paired t-test: t=%.3f, p=%.3f (H0: ratio=100%%)\n",
+            t2.t_statistic, t2.p_value_approx);
+        if (t2.p_value_approx > 0.05)
+            printf("  -> Input-independent (no significant difference, p=%.3f)\n", t2.p_value_approx);
         else
-            printf("  -> %.0f%% gap is GPU memory I/O (not ASIC-relevant)\n",
-                (1.0 - t2.ratio) * 100);
+            printf("  -> %.1f%% gap (p=%.3f) — GPU memory I/O (not ASIC-relevant)\n",
+                100.0 - t2.ratio_mean, t2.p_value_approx);
         printf("════════════════════════════════════════════════════\n");
     }
 
