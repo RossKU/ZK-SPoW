@@ -289,6 +289,8 @@ The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p;
 
 **STARK proofs are NOT included in the block.** They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3–5 MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100 BPS.
 
+**Proof verification with header binding.** Because Merkle commitments use header\_digest as a salt (§3.1), each STARK proof is bound to a specific block header. The proof transcript includes header\_digest as a public input; the verifier uses it when checking Merkle decommitment paths (each node: Poseidon2(left\_child || right\_child || header\_digest) = parent). Since header\_digest = PoseidonSponge(block header) is deterministically derivable from public block data, any third party can verify the proof without additional trust assumptions. This is a standard public-input mechanism: the proof attests "this computation is correct for public input header\_digest = X."
+
 ### 3.5 Header Digest Collision Resistance
 
 The header digest h\_H compresses the block header (excluding nonce) into k field elements. If k is too small, an attacker can find two headers H\_A ≠ H\_B with identical h\_H, allowing PoW solutions to be transplanted between conflicting blocks.
@@ -465,15 +467,17 @@ ZK-SPoW uses Width-24 Poseidon2 compression function for both STARK Merkle hashi
 
 **STARK soundness.** The header\_digest acts as a fixed salt in each Merkle hash: it is determined by the block header before proof generation begins and cannot be chosen adaptively by the prover. STARK soundness therefore reduces to collision resistance of the Width-24 compression function with a fixed third input — a strictly easier assumption than collision resistance under adversarially chosen inputs. The Stwo-Kaspa verifier reconstructs Merkle nodes using the same header\_digest, preserving the binding property.
 
-**Preimage resistance (PoW security).** PoW requires only preimage resistance of the 248-bit output — trivially satisfied by 30 rounds of Poseidon2 (8 external + 22 internal).
+**Preimage resistance (PoW security).** PoW requires only preimage resistance of the 248-bit output. The 30-round Poseidon2 permutation (8 external + 22 internal) satisfies this: no known attack reduces the preimage search below the generic 2^248 bound, and the round count follows Plonky3's security formula with margin [10].
 
 **R\_p for Width-24.** The internal round count increases from R\_p = 14 (Width-16) to R\_p = 22 (Width-24) for 128-bit security at D = 5 over M31. This is computed via Plonky3's round number formula [10], which applies the security constraints from [2][3] plus the algebraic attack bound from Khovratovich et al. (ePrint 2023/537), with a security margin of R\_f += 2, R\_p × 1.075. The binding constraint is statistical (R\_f ≥ 6). Total rounds: 30 (8 + 22) vs 22 (8 + 14) for Width-16. S-box operations per permutation increase by 51% (214 vs 142); however, compression function mode requires only 1 permutation per Merkle hash (vs 2 in sponge mode), yielding 25% fewer S-boxes per hash (214 vs 2 × 142 = 284). Supplementary verification: M\_I^k is invertible for all k = 1..48 (necessary condition for subspace trail resistance [3]). Diffusion analysis confirms full input-to-output dependency from the first external round. Algebraic degree after the full 30-round permutation exceeds 2^69, well above the 2^64 threshold for interpolation security at 128 bits.
+
+**Recent cryptanalysis.** Merz and Rodríguez García [12] improve algebraic CICO attacks on Poseidon2 by exploiting M\_I's sparse structure (round-skipping). For one recommended 128-bit parameter set, the improvement is 2^106 over prior art; however, the authors note that the full-round primitive "does not fall short of its claimed security level." Separately, resultant-based attacks [13] solve small-scale Poseidon2-M31 bounty instances (R\_f ≤ 6, R\_p ≤ 4; ≤10 total rounds). These results do not affect the 30-round (8+22) configuration: the security margin (R\_f += 2, R\_p × 1.075) absorbs the improved attack complexities.
 
 ### 6.4 PoW Hash Distribution
 
 All three output regions — pow\_ticket₀ = S[0..7], pow\_ticket₁ = S[8..15], pow\_ticket₂ = S[16..23] — are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The three PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict one ticket from another without computing the full permutation would violate the PRP assumption — equivalent to breaking Poseidon2. The full-round permutation (8 external + 22 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
 
-**Triple-ticket mining:** Under the PRP assumption on Poseidon2, the three tickets are mutually independent (Appendix B.7). With three 248-bit tickets per permutation, the per-permutation success probability is exact:
+**Triple-ticket mining:** Under the PRP assumption on Poseidon2, the three tickets are computationally indistinguishable from mutually independent uniform blocks (Appendix B.7). With three 248-bit tickets per permutation, the per-permutation success probability under the ideal-PRP model is:
 
 ```
 P(valid) = 1 - (1 - p)³ = 3p - 3p² + p³,    p = T/2^248
@@ -1095,3 +1099,7 @@ Both kernels check all 3 output tickets against a difficulty target. To eliminat
 [10] Plonky3. "A Toolkit for Polynomial IOPs." `poseidon2/src/round_numbers.rs`, `mersenne-31/src/poseidon2.rs`. https://github.com/Plonky3/Plonky3 (accessed 2026-02-16).
 
 [11] Nockchain. "The zkPoW L1." https://www.nockchain.org/ (accessed 2026-02-18).
+
+[12] Merz, S.-P. & Rodríguez García, À. (2026). "Skipping Class: Algebraic Attacks exploiting weak matrices and operation modes of Poseidon2(b)." *IACR Cryptology ePrint Archive*, 2026/306. https://eprint.iacr.org/2026/306
+
+[13] "Claiming bounties on small scale Poseidon and Poseidon2 instances using resultant-based algebraic attacks." *IACR Cryptology ePrint Archive*, 2026/150. https://eprint.iacr.org/2026/150

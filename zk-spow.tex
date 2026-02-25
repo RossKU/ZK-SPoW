@@ -387,6 +387,8 @@ Block hash & Blake2b-256 $\to$ 256-bit & Blake2b-256 $\to$ 256-bit (\textbf{unch
 
 \textbf{STARK proofs are NOT included in the block.} They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3--5~MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100~BPS.
 
+\textbf{Proof verification with header binding.} Because Merkle commitments use $\mathit{header\_digest}$ as a salt (\S\ref{sec:io}), each STARK proof is bound to a specific block header. The proof transcript includes $\mathit{header\_digest}$ as a public input; the verifier uses it when checking Merkle decommitment paths (each node: $\text{Poseidon2}(\mathit{left\_child} \| \mathit{right\_child} \| \mathit{header\_digest}) = \mathit{parent}$). Since $\mathit{header\_digest} = \text{PoseidonSponge}(\text{block header})$ is deterministically derivable from public block data, any third party can verify the proof without additional trust assumptions. This is a standard public-input mechanism: the proof attests ``this computation is correct for public input $\mathit{header\_digest} = X$.''
+
 \subsection{Header Digest Collision Resistance}
 
 The header digest $h_H$ compresses the block header (excluding nonce) into $k$ field elements. If $k$ is too small, an attacker can find two headers $H_A \neq H_B$ with identical $h_H$, allowing PoW solutions to be transplanted between conflicting blocks.
@@ -613,16 +615,18 @@ Independence & PoW $\neq$ STARK & PoW = STARK \\
 
 \textbf{STARK soundness.} The $\mathit{header\_digest}$ acts as a fixed salt in each Merkle hash: it is determined by the block header before proof generation begins and cannot be chosen adaptively by the prover. STARK soundness therefore reduces to collision resistance of the Width-24 compression function with a fixed third input---a strictly easier assumption than collision resistance under adversarially chosen inputs. The Stwo-Kaspa verifier reconstructs Merkle nodes using the same $\mathit{header\_digest}$, preserving the binding property.
 
-\textbf{Preimage resistance (PoW security).} PoW requires only preimage resistance of the 248-bit output---trivially satisfied by 30 rounds of Poseidon2 (8 external + 22 internal).
+\textbf{Preimage resistance (PoW security).} PoW requires only preimage resistance of the 248-bit output. The 30-round Poseidon2 permutation (8 external + 22 internal) satisfies this: no known attack reduces the preimage search below the generic $2^{248}$ bound, and the round count follows Plonky3's security formula with margin~\cite{plonky3}.
 
 \textbf{$R_p$ for Width-24.} The internal round count increases from $R_p = 14$ (Width-16) to $R_p = 22$ (Width-24) for 128-bit security at $D = 5$ over M31. This is computed via Plonky3's round number formula~\cite{plonky3}, which applies the security constraints from \cite{poseidon,poseidon2} plus the algebraic attack bound from Khovratovich et al.\ (ePrint 2023/537), with a security margin of $R_f \mathrel{{+}{=}} 2$, $R_p \times 1.075$. The binding constraint is statistical ($R_f \geq 6$). Total rounds: 30 ($8 + 22$) vs 22 ($8 + 14$) for Width-16. S-box operations per permutation increase by 51\% (214 vs 142); however, compression function mode requires only 1~permutation per Merkle hash (vs 2 in sponge mode), yielding 25\% fewer S-boxes per hash (214 vs $2 \times 142 = 284$). Supplementary verification: $M_I^k$ is invertible for all $k = 1..48$ (necessary condition for subspace trail resistance~\cite{poseidon2}). Diffusion analysis confirms full input-to-output dependency from the first external round. Algebraic degree after the full 30-round permutation exceeds $2^{69}$, well above the $2^{64}$ threshold for interpolation security at 128 bits.
+
+\textbf{Recent cryptanalysis.} Merz and Rodr{\'\i}guez Garc{\'\i}a~\cite{skipping2026} improve algebraic CICO attacks on Poseidon2 by exploiting $M_I$'s sparse structure (round-skipping). For one recommended 128-bit parameter set, the improvement is $2^{106}$ over prior art; however, the authors note that the full-round primitive ``does not fall short of its claimed security level.'' Separately, resultant-based attacks~\cite{resultant2026} solve small-scale Poseidon2-M31 bounty instances ($R_f \leq 6$, $R_p \leq 4$; $\leq$10 total rounds). These results do not affect the 30-round ($8{+}22$) configuration: the security margin ($R_f{+}{=}2$, $R_p \times 1.075$) absorbs the improved attack complexities.
 
 \subsection{PoW Hash Distribution}
 \label{sec:pow-dist}
 
 All three output regions---$\mathit{pow\_ticket}_0 = S[0..7]$, $\mathit{pow\_ticket}_1 = S[8..15]$, and $\mathit{pow\_ticket}_2 = S[16..23]$---are outputs of the same Poseidon2 permutation. In compression function mode, all 24 state elements are visible by design. Security relies on the permutation's PRP properties: given a random-looking input, all output elements should be indistinguishable from random. The three PoW tickets are deterministically linked (same permutation), but each is individually pseudorandom. An attacker who could predict one ticket from another without computing the full permutation would violate the PRP assumption---equivalent to breaking Poseidon2. The full-round permutation (8 external + 22 internal) ensures all output elements are cryptographically mixed across all 24 state positions.
 
-\textbf{Triple-ticket mining:} Under the PRP assumption on Poseidon2, the three tickets are mutually independent (Appendix~\ref{app:triple-ticket}). With three 248-bit tickets per permutation, the per-permutation success probability is exact:
+\textbf{Triple-ticket mining:} Under the PRP assumption on Poseidon2, the three tickets are computationally indistinguishable from mutually independent uniform blocks (Appendix~\ref{app:triple-ticket}). With three 248-bit tickets per permutation, the per-permutation success probability under the ideal-PRP model is:
 \[
 P(\text{valid}) = 1 - (1 - p)^3 = 3p - 3p^2 + p^3, \quad p = T/2^{248}\footnote{Each M31 element ranges over $[0, 2^{31}-2]$, so the exact denominator is $(2^{31}-1)^8$ rather than $2^{248}$. The ratio $(2^{31}-1)^8/2^{248} = (1-2^{-31})^8 \approx 1 - 3.7 \times 10^{-9}$. We use $2^{248}$ throughout as a convenient approximation.}
 \]
@@ -1355,6 +1359,17 @@ Plonky3,
 Nockchain,
 ``The zkPoW L1.''
 \url{https://www.nockchain.org/} (accessed 2026-02-18).
+
+\bibitem{skipping2026}
+S.-P.~Merz and {\`A}.~Rodr{\'\i}guez Garc{\'\i}a,
+``Skipping Class: Algebraic Attacks exploiting weak matrices and operation modes of Poseidon2(b),''
+\emph{IACR Cryptology ePrint Archive}, 2026/306, 2026.
+\url{https://eprint.iacr.org/2026/306}
+
+\bibitem{resultant2026}
+``Claiming bounties on small scale Poseidon and Poseidon2 instances using resultant-based algebraic attacks,''
+\emph{IACR Cryptology ePrint Archive}, 2026/150, 2026.
+\url{https://eprint.iacr.org/2026/150}
 
 \end{thebibliography}
 
