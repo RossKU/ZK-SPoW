@@ -8,7 +8,7 @@ February 2026 — Version 2.0 (Draft)
 
 ## Abstract
 
-Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost, but faces a fundamental limit: difficulty adjustment normalizes total mining expenditure to block rewards regardless of how much computation is useful—useful byproducts do not reduce energy, and to the extent they hold external value, they reduce the net cost of attack [1]. ZK-based approaches additionally confront a *non-memoryless* problem: STARK proof generation is stateful and multi-phase, creating progress advantages that violate the trial independence required for fair PoW.
+Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost—a direction Ball et al. [1] show faces fundamental deployment constraints. ZK-based approaches—using STARK proof generation as useful work—are a natural candidate, but STARK proving is inherently *non-memoryless*: it is stateful and multi-phase, creating progress advantages that violate the trial independence required for fair PoW.
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) addresses the non-memoryless problem by extracting PoW at the *permutation level*. Each Poseidon2 permutation within the STARK Merkle tree simultaneously advances the ZK proof and produces PoW tickets. Under the pseudorandom permutation (PRP) assumption, each output is independent regardless of the structured STARK context—yielding Bernoulli trials and memoryless block discovery. Header staleness is bounded by one Merkle commitment phase (~3 ms GPU, <1 ms ASIC).
 
