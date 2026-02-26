@@ -54,10 +54,8 @@ The mechanism: STARK proof generation requires millions of Merkle hashes. Each W
 
 $$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 
-- **ZK-SPoW** (continuous proving): Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. Multiple proofs do not reduce $U$; ZK work is preserved regardless of PoW outcome.
-- **ZK-SPoW** (with idle gaps): Pure PoW fallback trials (no pending ZK work) are wasted → $U$ decreases proportionally.
-- **Proof-level** [14]: Losing miners' proofs are discarded. Wasted trials scale with competition → $U \approx 1/N$ with $N$ miners.
-- **Pure PoW**: No trial produces useful output → $U = 0\%$.
+- **Continuous proving**: Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. Multiple proofs do not reduce $U$; ZK work is preserved regardless of PoW outcome.
+- **With idle gaps**: Pure PoW fallback trials (no pending ZK work) are wasted → $U$ decreases proportionally.
 
 The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
 
@@ -187,6 +185,7 @@ The key differentiator of ZK-SPoW is the *granularity* at which PoW operates wit
 | Max staleness | Proof duration (tens of ms–s) | Proof duration (seconds) | **1 Merkle phase (~3 ms measured)** |
 | Losing miners' work | Proofs discarded | Proofs discarded | **ZK proof survives PoW failure** |
 | Useful work coupling | Proof = PoW (tight) | Proof then hash (loose) | **Permutation = PoW + ZK (tight)** |
+| Usefulness $U$ | $\sim 1/N$ ($N$ miners; losing proofs discarded) | $\sim 1/N$ | **100%** (ZK work preserved) |
 
 **Proof-level approaches** (e.g., arXiv 2510.09729) treat proof completion as the lottery event. Two issues arise. First, a proof takes tens of milliseconds to seconds—during that window, a miner who is closer to completion has a higher conditional probability of finding a block, making the scheme non-memoryless. Second, only the winning miner's proofs enter the chain; losing miners must discard their proofs. Under difficulty adjustment, effective usefulness converges toward that of pure PoW as competition grows.
 
@@ -624,13 +623,13 @@ Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW s
 
 ### 8.4 Memorylessness Comparison
 
-| Approach | PoW Granularity | Max Staleness | Progress-Free? | Losing miners' work |
-|---|---|---|---|---|
-| SHA-256 (Bitcoin) | 1 hash = 1 trial | 0 (stateless) | **Yes** | Security only |
-| kHeavyHash (Kaspa) | 1 hash = 1 trial | 0 (stateless) | **Yes** | Security only |
-| Proof-level [2510.09729] | 1 proof = 1 trial | Tens of ms–s | **No** | Proofs discarded |
-| Nockchain [11] | Proof → hash | Seconds | Partially | Proofs discarded |
-| **ZK-SPoW** | **1 perm = 1 trial** | **~3 ms (measured)** | **Yes** (PRP) | **ZK work preserved** |
+| Approach | PoW Granularity | Max Staleness | Progress-Free? | Losing miners' work | $U$ |
+|---|---|---|---|---|---|
+| SHA-256 (Bitcoin) | 1 hash = 1 trial | 0 (stateless) | **Yes** | Security only | 0% |
+| kHeavyHash (Kaspa) | 1 hash = 1 trial | 0 (stateless) | **Yes** | Security only | 0% |
+| Proof-level [2510.09729] | 1 proof = 1 trial | Tens of ms–s | **No** | Proofs discarded | $\sim 1/N$ |
+| Nockchain [11] | Proof → hash | Seconds | Partially | Proofs discarded | $\sim 1/N$ |
+| **ZK-SPoW** | **1 perm = 1 trial** | **~3 ms (measured)** | **Yes** (PRP) | **ZK work preserved** | **100%** |
 
 ZK-SPoW is the only ZK-based PoW scheme that achieves the same progress-free property as traditional hash-based PoW, while simultaneously producing useful computation. The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on SHA-256/kHeavyHash.
 
