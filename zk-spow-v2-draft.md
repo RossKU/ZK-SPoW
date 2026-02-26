@@ -8,11 +8,11 @@ February 2026 — Version 2.0 (Draft)
 
 ## Abstract
 
-Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost—a direction Ball et al. [1] show faces fundamental deployment constraints. ZK-based approaches—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
+Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost—a direction Ball et al. [1] show faces fundamental deployment constraints. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) addresses the non-memoryless problem by extracting PoW at the *permutation level*. Each Poseidon2 permutation within the STARK Merkle tree simultaneously advances the ZK proof and produces PoW tickets. Under the pseudorandom permutation (PRP) assumption, each output is independent regardless of the structured STARK context—yielding Bernoulli trials and memoryless block discovery. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
 
-We instantiate for Kaspa with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): per-permutation usefulness $U \approx 67\%$, three PoW tickets per permutation, zero switching overhead between compute-bound PoW and memory-bound STARK proving. Security claims assume final Poseidon2 production parameters (§9).
+We instantiate for Kaspa with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, $U = 100\%$ during continuous proving (proof-level: $\sim 1/N$; pure PoW: $0\%$), zero switching overhead between compute-bound PoW and memory-bound STARK proving. Security claims assume final Poseidon2 production parameters (§9).
 
 ---
 
@@ -26,22 +26,13 @@ Kaspa uses kHeavyHash—cSHAKE256 (Keccak/SHA-3 family) composed with a 64×64 m
 
 ### 1.2 The Memoryless Requirement in Proof of Work
 
-A PoW scheme is *progress-free* (or *memoryless*) if the probability of finding a valid block on any given trial is independent of all previous trials. This property is fundamental to PoW security for three reasons:
+A PoW scheme is *progress-free* (or *memoryless*) if the probability of finding a valid block on any trial is independent of all previous trials. This property is fundamental:
 
-1. **Fairness.** If mining has "progress"—where partial computation toward a solution carries over to the next attempt—then miners who have invested more work have a higher instantaneous probability of success. This creates a rich-get-richer dynamic that undermines the proportional-hashrate fairness assumption.
+1. **Fairness.** Progress-based mining gives miners with more accumulated work a higher instantaneous success probability, undermining proportional-hashrate fairness.
+2. **Poisson block arrival.** Independent Bernoulli trials yield a Poisson block arrival process—a prerequisite for DAGKnight's security proofs [5].
+3. **Difficulty adjustment.** Memoryless trials give expected block time $1/(N \cdot H \cdot p)$. Progress introduces state-dependent variance that breaks difficulty estimation.
 
-2. **Poisson block arrival.** When each trial is an independent Bernoulli event with success probability $p = T/2^n$, the inter-block time follows a geometric distribution, and in the continuous limit (high hashrate, small $p$), block arrivals form a Poisson process. This Poisson structure is not merely convenient—it is a *prerequisite* for the security proofs of DAG-based protocols. DAGKnight [5] proves safety and liveness under the explicit assumption that honest block arrivals follow a Poisson process with rate $\lambda$. Violating this assumption invalidates the protocol's security guarantees.
-
-3. **Difficulty adjustment.** Memoryless mining ensures that the expected time to find a block is $1/(N \cdot H \cdot p)$, where $N$ is the number of miners and $H$ is per-miner hashrate. Difficulty adjustment algorithms rely on this predictable relationship. Progress-based mining introduces variance that depends on the internal state of each miner's computation, making difficulty estimation unreliable.
-
-**What breaks without memorylessness.** Consider a PoW scheme where finding a block requires completing a computation that takes $T$ seconds. A miner who has spent $T/2$ seconds has "progressed" halfway—their conditional probability of success in the next instant is higher than a miner who just started. This creates:
-- **Selfish mining amplification**: A miner with partial progress can strategically delay revealing blocks, knowing their lead is "banked."
-- **Withholding incentives**: Pool participants can exploit partial progress information.
-- **Timestamp manipulation**: Miners may manipulate timestamps to extend their computation window.
-
-**Historical precedent.** Primecoin's Cunningham chain PoW is partially progressive: extending a chain of primes builds on previous work. While Primecoin's design mitigates the worst effects, it illustrates how progress within a mining attempt complicates the security analysis.
-
-**Traditional PoW is memoryless by construction.** SHA-256 (Bitcoin), Ethash (Ethereum PoW), and kHeavyHash (Kaspa) all operate as: compute hash of (header, nonce), check if output < target, increment nonce. Each hash evaluation is independent. The challenge arises when attempting to make PoW *useful*: useful computation (STARK proving, optimization, etc.) is inherently stateful and progressive.
+SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each hash evaluation is independent. The challenge: useful computation (STARK proving, optimization) is inherently stateful and progressive.
 
 ### 1.3 The PoUW Paradox and Its Inversion
 
@@ -60,10 +51,15 @@ The fundamental tension: PoW requires random exploration (nonce grinding), while
 The mechanism: STARK proof generation requires millions of Merkle hashes. Each Width-24 Poseidon2 Merkle hash takes $(left\_child, right\_child, header\_digest)$ as input and produces $(pow\_ticket_0, pow\_ticket_1, pow\_ticket_2)$ as output, where $pow\_ticket_0 = merkle\_parent$ simultaneously advances the ZK proof. All three output regions are checked against the difficulty target. The miner cannot choose the Merkle inputs—they are determined by the STARK computation.
 
 **Definition (Usefulness).**
-- $U = t_0/t = 16/24 \approx 67\%$ when the ASIC is executing ZK proof computation (Symbiotic mode)
-- $U = 0\%$ when the ASIC is grinding nonces without concurrent ZK computation (Pure PoW mode)
 
-The 33% overhead per permutation is the cost of PoW integration: 8 of 24 input state elements carry $header\_digest$ rather than ZK data. $U$ is a per-permutation metric. The time-averaged usefulness is $U_{avg} = f_{sym} \times U$, where $f_{sym}$ is the fraction of cycles executing STARK Merkle hashes (see §5.6 and Appendix A).
+$$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
+
+- **ZK-SPoW** (continuous proving): Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. Multiple proofs do not reduce $U$; ZK work is preserved regardless of PoW outcome.
+- **ZK-SPoW** (with idle gaps): Pure PoW fallback trials (no pending ZK work) are wasted → $U$ decreases proportionally.
+- **Proof-level** [14]: Losing miners' proofs are discarded. Wasted trials scale with competition → $U \approx 1/N$ with $N$ miners.
+- **Pure PoW**: No trial produces useful output → $U = 0\%$.
+
+The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
 
 ### 1.4 Our Solution: Permutation-Level PoW Extraction
 
