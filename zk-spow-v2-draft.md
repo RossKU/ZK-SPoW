@@ -75,7 +75,7 @@ However, ZK-SPoW does not use proof completion as the PoW event. Instead, **each
 
 - Each permutation output is pseudorandom, regardless of input structure
 - The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
-- Each PoW trial takes nanoseconds (one permutation), not minutes (one proof)
+- Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
 
 **Result:** ZK-SPoW is progress-free despite embedding PoW within a stateful computation. Block discovery follows a Poisson process. DAGKnight's security proofs apply without modification.
 
@@ -186,20 +186,17 @@ The key differentiator of ZK-SPoW is the *granularity* at which PoW operates wit
 | Property | Proof-Level [2510.09729] | Sequential (Nockchain [11]) | **Permutation-Level (ZK-SPoW)** |
 |---|---|---|---|
 | PoW granularity | 1 proof = 1 lottery ticket | Proof → hash → check | **1 permutation = 1 trial** |
-| Trial duration | Minutes | Seconds (proof) + μs (hash) | **Nanoseconds** |
+| Trial duration | Tens of ms to seconds | Seconds (proof) + μs (hash) | **Nanoseconds** |
 | Progress-free? | **No** — partial proof = sunk cost | Partially — proof phase is progressive | **Yes** — PRP guarantees independence |
-| Max staleness | Proof duration (minutes) | Proof duration (seconds) | **1 Merkle phase (ms)** |
-| DAGKnight compatible? | Requires analysis | Requires analysis | **Yes** — Poisson block arrival |
+| Max staleness | Proof duration (tens of ms–s) | Proof duration (seconds) | **1 Merkle phase (~3 ms measured)** |
+| Losing miners' work | Proofs discarded | Proofs discarded | **ZK proof survives PoW failure** |
 | Useful work coupling | Proof = PoW (tight) | Proof then hash (loose) | **Permutation = PoW + ZK (tight)** |
 
-**Proof-level approaches** (e.g., arXiv 2510.09729) treat proof completion as the lottery event. The advantage: tight coupling between useful work and PoW. The problem: a proof takes minutes. Within that window, the scheme is non-memoryless. A miner who has spent 5 minutes on a proof has a higher conditional probability of "winning" in the next minute than a miner who just started. This progress advantage:
-- Violates the Poisson assumption required by DAGKnight
-- Creates incentives for larger miners (more parallel proofs = more diversified progress portfolio)
-- Complicates difficulty adjustment (variance depends on proof-time distribution, not just hashrate)
+**Proof-level approaches** (e.g., arXiv 2510.09729) treat proof completion as the lottery event. Two issues arise. First, a proof takes tens of milliseconds to seconds—during that window, a miner who is closer to completion has a higher conditional probability of finding a block, making the scheme non-memoryless. Second, only the winning miner's proofs enter the chain; losing miners must discard their proofs. Under difficulty adjustment, effective usefulness converges toward that of pure PoW as competition grows.
 
 **Sequential approaches** (Nockchain [11]) compute a ZK proof first, then hash the proof for PoW. The hash step is memoryless, but the proof step is progressive. The overall scheme has mixed memoryless properties: between proofs, trials are independent; within a proof, progress accumulates.
 
-**ZK-SPoW** operates at the finest possible granularity: individual permutations. Since each Poseidon2 evaluation takes nanoseconds and produces an independent output (Theorem 1), the scheme is fully progress-free. The "useful work" (advancing the STARK Merkle tree) happens as a side effect of the PoW trial, not as a prerequisite for it.
+**ZK-SPoW** operates at the finest possible granularity: individual permutations. Since each Poseidon2 evaluation takes nanoseconds and produces an independent output (Theorem 1), the scheme is fully progress-free. The useful work (advancing the STARK Merkle tree) happens as a side effect of the PoW trial, not as a prerequisite for it. Crucially, the STARK proof continues regardless of PoW outcomes—losing miners' ZK computation is not wasted.
 
 ---
 
@@ -592,11 +589,11 @@ Pure PoW's ~1.1–1.2× power-efficiency advantage yields at most ~10–20% more
 
 Several proposals use ZK proof generation as useful work within PoW:
 
-**arXiv 2510.09729.** This proposal treats proof completion as a lottery ticket—completing a STARK proof yields one PoW attempt. The advantage is tight coupling between useful work and PoW security. The fundamental limitation: proofs take minutes to complete, creating a non-memoryless window. Within a proof, the miner accumulates "progress" that increases their conditional probability of winning. This violates the progress-free property required for Poisson block arrival (§2.1).
+**arXiv 2510.09729.** This proposal treats proof completion as a lottery ticket—completing a STARK proof yields one PoW attempt. Two limitations arise. First, proofs take tens of milliseconds to seconds, making the scheme non-memoryless: miners closer to completion have a higher conditional probability of finding a block, violating the progress-free property (§2.1). Second, losing miners must discard their proofs—only the winner's proofs enter the chain. Under difficulty adjustment with $N$ competing miners, useful output is $\sim 1/N$ of total computation, converging toward pure PoW.
 
-Crucially, the granularity difference is not quantitative but qualitative:
-- **Proof-level**: 1 trial per minutes → non-memoryless within proof → requires separate analysis for DAGKnight compatibility
-- **Permutation-level (ZK-SPoW)**: 1 trial per nanoseconds → PRP-memoryless → Poisson block arrival by construction (Theorem 1)
+Granularity comparison:
+- **Proof-level**: 1 trial per tens of ms–seconds → non-memoryless, losing proofs wasted
+- **Permutation-level (ZK-SPoW)**: 1 trial per nanoseconds → PRP-memoryless, ZK work survives PoW failure
 
 **Ofelimos [7].** Uses SNARK proofs as useful work in a provably secure PoUW framework. The useful computation is protocol-mandated (combinatorial optimization), not market-driven. Like ZK-SPoW, Ofelimos addresses the PoUW challenge formally, but operates in the "PoW → useful" direction with domain-specific verification.
 
@@ -631,13 +628,13 @@ Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW s
 
 ### 8.4 Memorylessness Comparison
 
-| Approach | PoW Granularity | Max Staleness | Progress-Free? | Hardware |
+| Approach | PoW Granularity | Max Staleness | Progress-Free? | Losing miners' work |
 |---|---|---|---|---|
-| SHA-256 (Bitcoin) | 1 hash = 1 trial | 0 (stateless) | **Yes** | ASIC |
-| kHeavyHash (Kaspa) | 1 hash = 1 trial | 0 (stateless) | **Yes** | ASIC |
-| Proof-level [2510.09729] | 1 proof = 1 trial | Minutes | **No** | GPU/ASIC |
-| Nockchain [11] | Proof → hash | Seconds | Partially | GPU |
-| **ZK-SPoW** | **1 perm = 1 trial** | **~ms** | **Yes** (PRP) | **ASIC** |
+| SHA-256 (Bitcoin) | 1 hash = 1 trial | 0 (stateless) | **Yes** | Security only |
+| kHeavyHash (Kaspa) | 1 hash = 1 trial | 0 (stateless) | **Yes** | Security only |
+| Proof-level [2510.09729] | 1 proof = 1 trial | Tens of ms–s | **No** | Proofs discarded |
+| Nockchain [11] | Proof → hash | Seconds | Partially | Proofs discarded |
+| **ZK-SPoW** | **1 perm = 1 trial** | **~3 ms (measured)** | **Yes** (PRP) | **ZK work preserved** |
 
 ZK-SPoW is the only ZK-based PoW scheme that achieves the same progress-free property as traditional hash-based PoW, while simultaneously producing useful computation. The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on SHA-256/kHeavyHash.
 
