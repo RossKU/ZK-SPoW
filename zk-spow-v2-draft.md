@@ -40,11 +40,13 @@ Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where 
 
 The fundamental tension: PoW requires random exploration (nonce grinding), while useful computation requires specific, deterministic work. Prior PoUW constructions [1, 7, 8, 9] achieve provable security for specific problem classes, but require pre-hashing, SNARGs, or domain-specific verification that limits practical deployment in high-throughput blockchains.
 
-**ZK-SPoW inverts this relationship.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a natural mathematical byproduct:
+**ZK-SPoW reverses this direction.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a natural mathematical byproduct:
 
 > **Conventional PoUW:** PoW computation → try to make results useful → fundamental constraints [1]
 >
 > **ZK-SPoW:** Useful ZK computation → PoW tickets as mathematical byproduct → no contradiction
+
+More precisely, ZK-SPoW is a **piggybacked coexistence**: the same Poseidon2 permutation call simultaneously advances a STARK proof and produces PoW tickets. The STARK does not *require* PoW, and the PoW does not *require* the STARK—they share hardware and computation as an amortized optimization. This differs from Ball et al.'s strict PoUW definition, where useful output is cryptographically *bound* to the PoW evidence. In ZK-SPoW, the binding is architectural (same permutation) rather than cryptographic (verifier-enforced). See §8.3 for a detailed comparison.
 
 **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
@@ -177,7 +179,11 @@ At throughput $R_{perm}$, phase $i$ completes in $t_i = (N_i - 1)/R_{perm}$ seco
 - **GPU** (measured): At $\ell = 20$ (trace size $2^{20}$), the largest Merkle tree has $\sim 2^{20}$ permutations. At 305 Mperm/s (Appendix C.2), $\Delta_{stale} \approx 3.4$ ms.
 - **ASIC** (projected): At $\sim 1$ Gperm/s per core with 21 cores, $R_{perm} \approx 21$ Gperm/s. $\Delta_{stale} \approx 0.05$ ms.
 
-**DAGKnight tolerance.** At 100 BPS, the block interval is 10 ms. DAGKnight accepts blocks with parent sets up to its anticone parameter (typically $\geq 10$) blocks deep, tolerating $\sim 100$ ms of latency. A 1-block staleness (10 ms worst case on GPU, <1 ms on ASIC) is well within tolerance and indistinguishable from normal parallel block production in the DAG.
+**DAGKnight tolerance.** At 100 BPS, the block interval is 10 ms. DAGKnight accepts blocks with parent sets up to its anticone parameter (typically $\geq 10$) blocks deep, tolerating $\sim 100$ ms of latency. GPU staleness (3.4 ms) is 34% of one block interval—non-negligible but within DAGKnight's tolerance. ASIC staleness (0.05 ms) is negligible.
+
+**Incentive-compatible behavior.** When a new block arrives mid-phase, a rational miner faces a choice: (1) complete the current phase with the now-stale header, or (2) abandon and restart with the new header. Completing is incentive-compatible: the PoW tickets remain valid (staleness is within tolerance), and the STARK proof progress is preserved. Abandoning wastes the partial phase computation. A miner should update $h_H$ at the next natural phase boundary.
+
+**Trace size tradeoff.** Larger traces ($2^\ell$) produce more useful ZK work per proof but increase the largest Merkle tree size $N_{max}$, raising $\Delta_{stale}$. At $\ell = 20$, $\Delta_{stale} \approx 3.4$ ms (GPU); at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms, exceeding one block interval at 100 BPS. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval. On ASIC ($R_{perm} \approx 21$ Gperm/s), even $\ell = 22$ yields $\Delta_{stale} \approx 0.2$ ms—well within bounds.
 
 ### 2.4 Comparison with Proof-Level Approaches
 
@@ -187,7 +193,7 @@ The key differentiator of ZK-SPoW is the *granularity* at which PoW operates wit
 |---|---|---|---|---|
 | PoW granularity | 1 hash = 1 trial | 1 proof = 1 ticket | Proof → hash | **1 perm = 1 trial** |
 | Trial duration | Nanoseconds | Tens of ms–s | Seconds + μs | **Nanoseconds** |
-| Progress-free? | **Yes** (info-theoretic) | **No** — sunk cost | Partially | **Yes** (computational, PRP) |
+| Progress-free? | **Yes** (info-theoretic) | **No** — sunk cost | **Final hash: yes**; proof phase: no | **Yes** (computational, PRP) |
 | Max staleness | 0 (stateless) | Proof duration | Proof duration | **~3 ms (measured)** |
 | Losing miners' work | Security only | Proofs discarded | Proofs discarded | **ZK work preserved** |
 | Useful work | None | Proof = PoW | Proof then hash | **Perm = PoW + ZK** |
@@ -604,6 +610,8 @@ Nockchain [11] is a Layer-1 blockchain using zkPoW, launched May 2025. Miners co
 
 The key architectural difference: Nockchain computes the ZK proof first, then hashes it for PoW—two disjoint steps. ZK-SPoW's internal STARK Merkle hash *directly* produces the PoW output from a single permutation.
 
+**Memorylessness nuance.** Nockchain's final hash-after-proof step is itself memoryless: the hash evaluation is independent of previous hashes. However, the proof computation phase preceding it is progressive (a miner closer to proof completion has higher conditional probability of reaching the hash step sooner). The overall block arrival process is therefore a *renewal process* where inter-arrival times are the sum of a progressive proof phase and a memoryless hash phase—not a pure Poisson process. The practical impact depends on proof duration relative to block interval: if proofs take seconds and blocks arrive every few seconds, the progressive component is significant. ZK-SPoW avoids this entirely by operating at permutation granularity (nanoseconds).
+
 ### 8.3 Relationship to Ball et al.
 
 Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. ZK-SPoW operates inversely: **useful computation → PoW output**.
@@ -612,9 +620,9 @@ Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. ZK-SP
 |---|---|---|
 | PoW produces useful output | Partial | **Yes**: every Symbiotic permutation advances a STARK proof |
 | Verifier confirms usefulness | Not enforced | Verifiable: STARK proofs are publicly checkable |
-| Useful output bound to PoW | Not enforced | **Inherent**: same permutation produces both |
+| Useful output bound to PoW | Not enforced | **Architectural**: same permutation produces both (not cryptographically enforced by the verifier) |
 
-Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by never attempting to make PoW useful—useful computation happens to produce PoW-valid outputs.
+Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by reversing the direction—useful computation happens to produce PoW-valid outputs. However, the binding between PoW and useful output is architectural (shared permutation call) rather than cryptographic (verifier-enforced). A miner *could* run Pure PoW mode exclusively, producing no useful output. The economic incentive for Symbiotic mode comes from ZK proof revenue, not from protocol enforcement. ZK-SPoW is therefore best characterized as **amortized coexistence** rather than strict PoUW in the Ball et al. sense.
 
 ### 8.4 Memorylessness Comparison
 
@@ -732,7 +740,13 @@ By linearity, $E[V_{\mathrm{PoW}}] = KPq$. The best-of-$K$ selection gives $E[\m
 
 $$E[\max(V_1, \ldots, V_K)] < KPq = E[V_{\mathrm{PoW}}]$$
 
-Multi-trial grinding is strictly dominated by pure PoW. Including the NTT and trace generation overhead (omitted above) makes the comparison strictly worse for grinding.
+Multi-trial grinding is strictly dominated by pure PoW in terms of PoW ticket yield. Including the NTT and trace generation overhead (omitted above) makes the comparison strictly worse for grinding.
+
+**Interaction with ZK proof revenue.** The analysis above considers only PoW utility. A grinder who computes $K$ traces also produces $K$ STARK proofs as a byproduct, each with market value $F$. The effective grinding cost becomes:
+
+$$C_{\mathrm{eff}} = K \times C_{\mathrm{trace}} - (K-1) \times F$$
+
+If $F$ is sufficiently large, the grinder recovers most of the grinding cost from proof sales. However, this does not improve the grinder's *PoW advantage*—the ticket distribution remains $\max(V_1, \ldots, V_K) < V_{\mathrm{PoW}}$. The economic benefit is orthogonal: any miner producing proofs for revenue would produce them sequentially regardless, obtaining the same $K$ proofs and $K \times P$ total tickets without the best-of-$K$ selection loss. Grinding remains dominated even when proof revenue is considered.
 
 ### B.6 Merkle Tree Feedback Structure
 
