@@ -12,13 +12,13 @@ Proof-of-work (PoW) blockchains expend energy solely for network security. Proof
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) addresses the non-memoryless problem by extracting PoW at the *permutation level*. Each Poseidon2 permutation within the STARK Merkle tree simultaneously advances the ZK proof and produces PoW tickets. Under the pseudorandom permutation (PRP) assumption, each output is independent regardless of the structured STARK context—yielding Bernoulli trials and memoryless block discovery. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
 
-We instantiate for Kaspa with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, $U = 100\%$ during continuous proving (proof-level: $\sim 1/N$; pure PoW: $0\%$), zero switching overhead between compute-bound PoW and memory-bound STARK proving. Security claims assume final Poseidon2 production round constants; the current Stwo implementation uses placeholder values.
+We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, $U = 100\%$ during continuous proving (proof-level: $\sim 1/N$; pure PoW: $0\%$), zero switching overhead between compute-bound PoW and memory-bound STARK proving. Security claims assume final Poseidon2 production round constants; the current Stwo implementation uses placeholder values.
 
 ---
 
 ## 1. Introduction
 
-We develop ZK-SPoW as a general framework and instantiate it for **Kaspa**, a PoW blockchain achieving real-time decentralization (RTD) at 100 blocks per second via the DAGKnight protocol [5]. Kaspa is evaluating StarkWare's Stwo—a high-performance STARK prover native to Poseidon2 over M31—making it a natural first candidate for PoW/STARK symbiosis.
+We develop ZK-SPoW as a general framework and instantiate it with Width-24 Poseidon2 over M31 using StarkWare's Stwo prover [4]. We evaluate under the most demanding setting: DAGKnight [5] at 100 blocks per second (10 ms block interval), where header staleness tolerance is tightest.
 
 ### 1.1 The PoW Energy Problem
 
@@ -71,7 +71,7 @@ However, ZK-SPoW does not use proof completion as the PoW event. Instead, **each
 - The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
 - Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
 
-**Result:** ZK-SPoW is progress-free despite embedding PoW within a stateful computation. Block discovery follows a Poisson process. DAGKnight's security proofs apply without modification.
+**Result:** ZK-SPoW is progress-free despite embedding PoW within a stateful computation. Block discovery follows a Poisson process, preserving the security assumptions of Nakamoto-style and DAG-based consensus.
 
 This resolves the fundamental tension between useful computation and memoryless PoW—not by making the computation memoryless, but by extracting PoW at a granularity where the PRP assumption guarantees independence.
 
@@ -86,8 +86,6 @@ This resolves the fundamental tension between useful computation and memoryless 
 4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with zero-cycle switching overhead, and provide ASIC architecture analysis for a 7 nm implementation (§5, Appendix A).
 
 5. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a computational byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle input sources ($99.3\% \pm 0.3\%$, 10 runs, alternating order; Appendix C.2).
-
-**Generality.** The ZK-SPoW construction is hardware-agnostic and not specific to Kaspa. Any PoW blockchain adopting Poseidon2-based STARKs can apply the same approach. We present Kaspa as the concrete instantiation: its planned Stwo integration, existing ASIC mining ecosystem, and 100 BPS throughput make it a compelling first target.
 
 ---
 
@@ -358,7 +356,7 @@ Header {
 
 The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block, ~0.04% of 125 KB).
 
-**Block hash vs PoW hash.** Kaspa computes block identity and PoW with separate hash functions. The block hash (Blake2b-256) provides DAG references—unchanged. Only the PoW function is replaced.
+**Block hash vs PoW hash.** Block identity and PoW use separate hash functions. The block hash (e.g., Blake2b-256 for DAG references) is unchanged; only the PoW function is replaced.
 
 **STARK proofs are NOT included in the block.** They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3–5 MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100 BPS.
 
@@ -402,7 +400,7 @@ if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 
 Every permutation simultaneously advances the ZK proof and produces PoW tickets ($U = 100\%$). GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix C.1).
 
-**Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; each phase completes within one block interval (<10 ms at ~2G hash/sec). Between phases, the header digest updates to the current block. Maximum staleness is 1 block—see Theorem 2 (§2.3) for formal bound and DAGKnight tolerance analysis.
+**Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; between phases it updates to the current chain tip. Maximum staleness is one Merkle phase—see Theorem 2 (§2.3).
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -465,7 +463,7 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity $c = 8$ M31
 
 **Single Primitive Dependency.**
 
-| Component | Current Kaspa | Proposed |
+| Component | Traditional (e.g., Kaspa [6]) | ZK-SPoW |
 |---|---|---|
 | PoW | kHeavyHash (Blake2b + cSHAKE256) | Poseidon2 |
 | STARK | Poseidon2 | Poseidon2 |
