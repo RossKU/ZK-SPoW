@@ -481,9 +481,15 @@ Under 200 GB/s SRAM bandwidth, $f_{sym} \approx 10\%$ of Poseidon2 cycles execut
 
 ### 6.1 Poseidon2 Cryptographic Properties
 
-Poseidon2 [3] provides 128-bit security in sponge mode with capacity $c = 8$ M31 elements (248 bits). In compression function mode (ZK-SPoW), security relies on collision resistance and preimage resistance of the permutation—well-established properties within the Poseidon2 framework (see §4.2 for mode comparison).
+**Sponge mode vs compression function mode.** Poseidon2 [3] provides 128-bit security in sponge mode via an indifferentiability argument: with capacity $c = 8$ M31 elements (248 bits), the sponge construction is indifferentiable from a random oracle up to $2^{124}$ queries. ZK-SPoW operates in compression function mode (§4.2), where all 24 input elements are visible—there is no hidden capacity. Security in this mode relies on different, more direct properties of the permutation $\pi$:
 
-**Single Primitive Dependency.**
+- **Collision resistance:** Finding $x \neq x'$ with $\pi(x)[0:7] = \pi(x')[0:7]$ requires $\Omega(2^{124})$ work (birthday bound on 248-bit output). This secures STARK Merkle binding.
+- **Preimage resistance:** Finding $x$ with $\pi(x)[0:7] < T$ requires $\Omega(1/p_t)$ work. This secures PoW.
+- **PRP (pseudorandom permutation):** Outputs are computationally indistinguishable from random, regardless of input structure. This secures progress-freedom (Theorem 1).
+
+These are strictly weaker assumptions than sponge-mode indifferentiability—collision/preimage resistance of a permutation is implied by, but does not require, random oracle behavior. However, the Poseidon2 literature [2, 3] primarily analyzes the sponge construction; dedicated security analysis of the bare permutation in compression function mode (e.g., against related-key or chosen-input-output attacks specific to this mode) is less mature. We consider this acceptable because: (1) the 30-round permutation's algebraic properties (S-box degree, MDS diffusion, round count margins) are mode-independent; (2) compression function mode exposes strictly more information to the attacker (no hidden capacity), making it a harder target—any attack on the compression function implies an attack on the sponge with equal or lower complexity.
+
+**Single primitive dependency.**
 
 | Component | Traditional (e.g., Kaspa [6]) | ZK-SPoW |
 |---|---|---|
@@ -491,7 +497,11 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity $c = 8$ M31
 | STARK | Poseidon2 | Poseidon2 |
 | Independence | PoW ≠ STARK | PoW = STARK |
 
-**Risk:** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously.
+**Correlated failure mode.** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously—a qualitatively different risk profile from traditional designs where PoW and STARK use independent primitives. We assess this risk quantitatively:
+
+- **Current margin.** The 30-round configuration ($R_f = 8$, $R_p = 22$) includes a $+2$ external round margin and $\times 1.075$ internal round margin over the minimum required by known attacks. Merz and Rodríguez García [12] improve algebraic CICO attacks by $2^{106}$ for one parameter set but conclude the full-round primitive "does not fall short of its claimed security level." Resultant-based attacks [13] solve instances with $\leq 10$ total rounds—far below the 30-round configuration.
+- **Margin erosion trajectory.** The attack improvement of [12] targets the sparse structure of $M_I$, a design feature inherent to Poseidon2. Further advances along this line are plausible. If a future attack reduces security below $2^{128}$ for Width-24/30-round, both PoW and STARK would require parameter updates simultaneously.
+- **Fallback strategy.** A Poseidon2 break does not require abandoning ZK-SPoW. The framework is parametric: increasing $R_p$ (more internal rounds) restores security at the cost of throughput and die area. In the extreme case, the chain can revert to Pure PoW mode with a different hash function while maintaining block production—Symbiotic mode is an overlay, not a prerequisite for consensus. A hard fork would be required in either case (as it would for any PoW hash function break).
 
 ### 6.2 Width-24 Security
 
@@ -503,7 +513,7 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity $c = 8$ M31
 
 **$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10], which applies constraints from [2, 3] plus the algebraic attack bound from Ashur, Buschman, and Mahzoun [15], with margin $R_f += 2$, $R_p \times 1.075$. Total rounds: 30 (8 + 22). S-box operations: 214 per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs 2 × 142 = 284). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$, above the $2^{64}$ threshold for 128-bit interpolation security.
 
-**Recent cryptanalysis.** Merz and Rodríguez García [12] improve algebraic CICO attacks by exploiting $M_I$'s sparse structure (round-skipping). For one recommended 128-bit parameter set, the improvement is $2^{106}$ over prior art; however, they note the full-round primitive "does not fall short of its claimed security level." Resultant-based attacks [13] solve small-scale instances ($R_f \leq 6$, $R_p \leq 4$; ≤10 total rounds). These do not affect the 30-round configuration.
+**Recent cryptanalysis.** See §6.1 (Current margin) for detailed analysis of [12] and [13].
 
 ### 6.3 Trace Grinding Resistance
 
