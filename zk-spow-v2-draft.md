@@ -22,14 +22,14 @@ We develop ZK-SPoW as a general framework and instantiate it for **Kaspa**, a Po
 
 ### 1.1 The PoW Energy Problem
 
-Kaspa uses kHeavyHash—cSHAKE256 (Keccak/SHA-3 family) composed with a 64×64 matrix multiplication over 4-bit nibbles—for proof of work. Like all traditional PoW schemes, the computational work produces no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
+Traditional PoW schemes produce no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
 
 ### 1.2 The Memoryless Requirement in Proof of Work
 
 A PoW scheme is *progress-free* (or *memoryless*) if the probability of finding a valid block on any trial is independent of all previous trials. This property is fundamental:
 
 1. **Fairness.** Progress-based mining gives miners with more accumulated work a higher instantaneous success probability, undermining proportional-hashrate fairness.
-2. **Poisson block arrival.** Independent Bernoulli trials yield a Poisson block arrival process—a prerequisite for DAGKnight's security proofs [5].
+2. **Poisson block arrival.** Independent Bernoulli trials yield a Poisson block arrival process—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
 3. **Difficulty adjustment.** Memoryless trials give expected block time $1/(N \cdot H \cdot p)$. Progress introduces state-dependent variance that breaks difficulty estimation.
 
 SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each hash evaluation is independent. The challenge: useful computation (STARK proving, optimization) is inherently stateful and progressive.
@@ -38,7 +38,7 @@ SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each ha
 
 Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where the mining computation simultaneously produces useful output. Their strict definition requires: (1) the PoW computation itself produces useful output, (2) the verifier can confirm the usefulness, and (3) the useful output is bound to the PoW evidence.
 
-The fundamental tension: PoW requires random exploration (nonce grinding), while useful computation requires specific, deterministic work. Prior PoUW constructions [1, 7, 8, 9] achieve provable security for specific problem classes, but require pre-hashing, SNARGs, or domain-specific verification that limits practical deployment in high-throughput blockchains (100 BPS).
+The fundamental tension: PoW requires random exploration (nonce grinding), while useful computation requires specific, deterministic work. Prior PoUW constructions [1, 7, 8, 9] achieve provable security for specific problem classes, but require pre-hashing, SNARGs, or domain-specific verification that limits practical deployment in high-throughput blockchains.
 
 **ZK-SPoW inverts this relationship.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a natural mathematical byproduct:
 
