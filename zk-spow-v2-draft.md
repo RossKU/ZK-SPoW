@@ -479,7 +479,7 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity $c = 8$ M31
 
 **Preimage resistance (PoW security).** The 30-round Poseidon2 permutation (8 external + 22 internal) satisfies this: no known attack reduces preimage search below the generic $2^{248}$ bound.
 
-**$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10], which applies constraints from [2, 3] plus the algebraic attack bound from Khovratovich [15], with margin $R_f += 2$, $R_p \times 1.075$. Total rounds: 30 (8 + 22). S-box operations: 214 per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs 2 × 142 = 284). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$, above the $2^{64}$ threshold for 128-bit interpolation security.
+**$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10], which applies constraints from [2, 3] plus the algebraic attack bound from Ashur, Buschman, and Mahzoun [15], with margin $R_f += 2$, $R_p \times 1.075$. Total rounds: 30 (8 + 22). S-box operations: 214 per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs 2 × 142 = 284). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$, above the $2^{64}$ threshold for 128-bit interpolation security.
 
 **Recent cryptanalysis.** Merz and Rodríguez García [12] improve algebraic CICO attacks by exploiting $M_I$'s sparse structure (round-skipping). For one recommended 128-bit parameter set, the improvement is $2^{106}$ over prior art; however, they note the full-round primitive "does not fall short of its claimed security level." Resultant-based attacks [13] solve small-scale instances ($R_f \leq 6$, $R_p \leq 4$; ≤10 total rounds). These do not affect the 30-round configuration.
 
@@ -795,7 +795,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 [4] StarkWare, "Stwo: A STARK Prover." https://github.com/starkware-libs/stwo
 
-[5] Y. Sompolinsky and M. Sutton, "The DAG KNIGHT Protocol," IACR ePrint 2022/1494, 2022. https://eprint.iacr.org/2022/1494
+[5] Y. Sompolinsky and M. Sutton, "The DAG KNIGHT Protocol: A Parameterless Generalization of Nakamoto Consensus," IACR ePrint 2022/1494, 2022. https://eprint.iacr.org/2022/1494
 
 [6] Kaspa, "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa
 
@@ -815,4 +815,4 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 [14] S. Oleksak, R. Gazdik, M. Peresini, and I. Homoliak, "Zk-SNARK Marketplace with Proof of Useful Work," arXiv:2510.09729, 2025. https://arxiv.org/abs/2510.09729
 
-[15] D. Khovratovich, "Algebraic attacks on hash functions over prime fields," IACR ePrint 2023/537, 2023. https://eprint.iacr.org/2023/537
+[15] T. Ashur, T. Buschman, and M. Mahzoun, "Algebraic Cryptanalysis of HADES Design Strategy: Application to POSEIDON and Poseidon2," IACR ePrint 2023/537, 2023. https://eprint.iacr.org/2023/537
