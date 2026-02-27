@@ -10,7 +10,7 @@ February 2026 — Version 2.0 (Draft)
 
 Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost—a direction Ball et al. [1] show faces fundamental deployment constraints. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
 
-**ZK-SPoW** (ZK-Symbiotic Proof of Work) addresses the non-memoryless problem by extracting PoW at the *permutation level*. Each Poseidon2 permutation within the STARK Merkle tree simultaneously advances the ZK proof and produces PoW tickets. Under the pseudorandom permutation (PRP) assumption, each output is independent regardless of the structured STARK context—yielding Bernoulli trials and memoryless block discovery. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
+**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographic byproduct. This inversion resolves the non-memoryless problem—each Poseidon2 permutation within the STARK is an independent PoW trial under the PRP assumption, yielding Bernoulli trials at nanosecond granularity rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
 
 We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, $U = 100\%$ during continuous proving (proof-level: $\sim 1/N$; pure PoW: $0\%$), zero switching overhead between compute-bound PoW and memory-bound STARK proving. Security claims assume final Poseidon2 production round constants; the current Stwo implementation uses placeholder values.
 
@@ -18,7 +18,7 @@ We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tick
 
 ## 1. Introduction
 
-We develop ZK-SPoW as a general framework and instantiate it with Width-24 Poseidon2 over M31 using StarkWare's Stwo prover [4]. We evaluate under the most demanding setting: DAGKnight [5] at 100 blocks per second (10 ms block interval), where header staleness tolerance is tightest.
+PoW blockchains waste energy on security-only computation (§1.1), yet replacing it with useful work requires preserving memoryless block discovery (§1.2)—a property fundamentally at odds with stateful computation. Prior PoUW approaches face deployment constraints in this direction (§1.3). ZK-SPoW inverts the relationship, extracting memoryless PoW from useful STARK computation at the permutation level (§1.4).
 
 ### 1.1 The PoW Energy Problem
 
@@ -54,7 +54,7 @@ The mechanism: STARK proof generation requires millions of Merkle hashes. Each W
 
 $$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 
-- **Continuous proving**: Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. Multiple proofs do not reduce $U$; ZK work is preserved regardless of PoW outcome.
+- **Continuous proving**: Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. Multiple proofs do not reduce $U$; ZK work remains useful regardless of PoW outcome.
 - **With idle gaps**: Pure PoW fallback trials (no pending ZK work) are wasted → $U$ decreases proportionally.
 
 The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
