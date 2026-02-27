@@ -787,32 +787,32 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 ## References
 
-[1] M. Ball, A. Rosen, M. Sabin, and P. N. Vasudevan, "Proofs of Useful Work," IACR ePrint 2017/203, 2017.
+[1] M. Ball, A. Rosen, M. Sabin, and P. N. Vasudevan, "Proofs of Useful Work," IACR ePrint 2017/203, 2017. https://eprint.iacr.org/2017/203
 
-[2] L. Grassi, D. Khovratovich, C. Rechberger, A. Roy, and M. Schofnegger, "Poseidon: A New Hash Function for Zero-Knowledge Proof Systems," USENIX Security 2021.
+[2] L. Grassi, D. Khovratovich, C. Rechberger, A. Roy, and M. Schofnegger, "Poseidon: A New Hash Function for Zero-Knowledge Proof Systems," USENIX Security 2021. https://eprint.iacr.org/2019/458
 
-[3] L. Grassi, D. Khovratovich, and M. Schofnegger, "Poseidon2: A Faster Version of the Poseidon Hash Function," IACR ePrint 2023/323, 2023.
+[3] L. Grassi, D. Khovratovich, and M. Schofnegger, "Poseidon2: A Faster Version of the Poseidon Hash Function," IACR ePrint 2023/323, 2023. https://eprint.iacr.org/2023/323
 
 [4] StarkWare, "Stwo: A STARK Prover." https://github.com/starkware-libs/stwo
 
-[5] Y. Sompolinsky and M. Sutton, "The DAG KNIGHT Protocol," IACR ePrint 2022/1494, 2022.
+[5] Y. Sompolinsky and M. Sutton, "The DAG KNIGHT Protocol," IACR ePrint 2022/1494, 2022. https://eprint.iacr.org/2022/1494
 
 [6] Kaspa, "kHeavyHash Specification." https://github.com/kaspanet/rusty-kaspa
 
-[7] M. Fitzi, A. Kiayias, G. Panagiotakos, and A. Russell, "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work," Crypto 2022.
+[7] M. Fitzi, A. Kiayias, G. Panagiotakos, and A. Russell, "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work," Crypto 2022. https://eprint.iacr.org/2021/1379
 
-[8] I. Komargodski and O. Weinstein, "Proofs of Useful Work from Arbitrary Matrix Multiplication," IACR ePrint 2025/685, 2025.
+[8] I. Komargodski and O. Weinstein, "Proofs of Useful Work from Arbitrary Matrix Multiplication," IACR ePrint 2025/685, 2025. https://eprint.iacr.org/2025/685
 
-[9] Y. Bar-On, I. Komargodski, and O. Weinstein, "Proof of Work With External Utilities," arXiv:2505.21685, 2025.
+[9] Y. Bar-On, I. Komargodski, and O. Weinstein, "Proof of Work With External Utilities," arXiv:2505.21685, 2025. https://arxiv.org/abs/2505.21685
 
 [10] Plonky3, "A Toolkit for Polynomial IOPs." https://github.com/Plonky3/Plonky3 (accessed 2026-02-16).
 
 [11] Nockchain, "The zkPoW L1." https://www.nockchain.org/ (accessed 2026-02-18).
 
-[12] S.-P. Merz and À. Rodríguez García, "Skipping Class: Algebraic Attacks exploiting weak matrices and operation modes of Poseidon2(b)," IACR ePrint 2026/306, 2026.
+[12] S.-P. Merz and À. Rodríguez García, "Skipping Class: Algebraic Attacks exploiting weak matrices and operation modes of Poseidon2(b)," IACR ePrint 2026/306, 2026. https://eprint.iacr.org/2026/306
 
-[13] A. Bak, A. Bariant, A. Boeuf, M. Hostettler, and G. Jazeron, "Claiming bounties on small scale Poseidon and Poseidon2 instances using resultant-based algebraic attacks," IACR ePrint 2026/150, 2026.
+[13] A. Bak, A. Bariant, A. Boeuf, M. Hostettler, and G. Jazeron, "Claiming bounties on small scale Poseidon and Poseidon2 instances using resultant-based algebraic attacks," IACR ePrint 2026/150, 2026. https://eprint.iacr.org/2026/150
 
-[14] S. Oleksak, R. Gazdik, M. Peresini, and I. Homoliak, "Zk-SNARK Marketplace with Proof of Useful Work," arXiv:2510.09729, 2025.
+[14] S. Oleksak, R. Gazdik, M. Peresini, and I. Homoliak, "Zk-SNARK Marketplace with Proof of Useful Work," arXiv:2510.09729, 2025. https://arxiv.org/abs/2510.09729
 
-[15] D. Khovratovich, "Algebraic attacks on hash functions over prime fields," IACR ePrint 2023/537, 2023.
+[15] D. Khovratovich, "Algebraic attacks on hash functions over prime fields," IACR ePrint 2023/537, 2023. https://eprint.iacr.org/2023/537
