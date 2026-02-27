@@ -83,7 +83,7 @@ This resolves the fundamental tension between useful computation and memoryless 
 
 3. **Width-24 Poseidon2 parameterization.** We specify Width-24 Poseidon2 over M31 in compression function mode (1 permutation per Merkle hash, vs 2 in sponge mode) and verify its security parameters: $R_p = 22$ internal rounds for 128-bit security with $D = 5$ (§6.3).
 
-4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with zero-cycle switching overhead, and provide gate-level ASIC architecture analysis for a 7 nm implementation (§5, Appendix A).
+4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with zero-cycle switching overhead, and provide ASIC architecture analysis for a 7 nm implementation (§5, Appendix A).
 
 5. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a computational byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle input sources ($99.3\% \pm 0.3\%$, 10 runs, alternating order; Appendix C.2).
 
@@ -168,7 +168,7 @@ $$\Delta_{stale} \leq \frac{N_{max}}{R_{perm}}$$
 At throughput $R_{perm}$, phase $i$ completes in $t_i = (N_i - 1)/R_{perm}$ seconds. The maximum staleness is the duration of the longest phase. Between phases, $h_H$ is refreshed to the current DAG tip. ∎
 
 **Concrete bounds:**
-- **GPU** (measured): At $k = 20$ (trace size $2^{20}$), the largest Merkle tree has $\sim 2^{20}$ permutations. At 305 Mperm/s (Table B.2), $\Delta_{stale} \approx 3.4$ ms.
+- **GPU** (measured): At $k = 20$ (trace size $2^{20}$), the largest Merkle tree has $\sim 2^{20}$ permutations. At 305 Mperm/s (Table C.2), $\Delta_{stale} \approx 3.4$ ms.
 - **ASIC** (projected): At $\sim 1$ Gperm/s per core with 21 cores, $R_{perm} \approx 21$ Gperm/s. $\Delta_{stale} \approx 0.05$ ms.
 
 **DAGKnight tolerance.** At 100 BPS, the block interval is 10 ms. DAGKnight accepts blocks with parent sets up to $k$ blocks deep (anticone parameter typically $k \geq 10$), tolerating $\sim 100$ ms of latency. A 1-block staleness (10 ms worst case on GPU, <1 ms on ASIC) is well within tolerance and indistinguishable from normal parallel block production in the DAG.
@@ -211,9 +211,8 @@ The key differentiator of ZK-SPoW is the *granularity* at which PoW operates wit
 | $(v_1, v_2)$ | Nonce: $v_1, v_2 \in \mathbb{F}_p^8$ |
 | $T$ | Target $\in \mathbb{F}_p^8$ (difficulty-adjusted) |
 | $S$ | Poseidon2 state after permutation, $S \in \mathbb{F}_p^t$ |
-| $U$ | Per-permutation usefulness: $t_0/t$ ($t_0$ useful elements in width-$t$ state) |
+| $U$ | Usefulness: ZK-contributing trials / total mining trials (§1.3) |
 | $f_{sym}$ | Fraction of Poseidon2 cycles executing STARK Merkle hashes |
-| $U_{avg}$ | Time-averaged usefulness: $f_{sym} \times U$ |
 
 **Stwo baseline parameters** (confirmed from source code [4]):
 
@@ -299,7 +298,7 @@ Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 | S-box operations | 142 | 214 | +51% |
 | State registers | 16 × 31 = 496 bits | 24 × 31 = 744 bits | +50% |
 
-**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (§6.3), adding +36% pipeline depth. Die area impact: ~+22% to ~+50% (Poseidon2 is 50% of die; Appendix A). Usefulness cost: $U = t_0/t = 16/24 \approx 67\%$.
+**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (§6.3), adding +36% pipeline depth. Die area impact: ~+22% to ~+50% (Poseidon2 is 50% of die; Appendix A). Per-permutation data overhead: 8/24 ≈ 33% of state carries header digest rather than ZK data.
 
 **Compression Function vs Sponge.**
 
@@ -405,7 +404,7 @@ pow_ticket2   = S[16..23]   <- checked against PoW target
 if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 ```
 
-$U = t_0/t = 16/24 \approx 67\%$. GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix C.1).
+Every permutation simultaneously advances the ZK proof and produces PoW tickets ($U = 100\%$). GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix C.1).
 
 **Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; each phase completes within one block interval (<10 ms at ~2G hash/sec). Between phases, the header digest updates to the current block. Maximum staleness is 1 block—see Theorem 2 (§2.3) for formal bound and DAGKnight tolerance analysis.
 
@@ -448,11 +447,11 @@ The transition is **per-cycle and linear**, not a discrete mode switch. The pipe
 
 ### 5.5 Difficulty Independence
 
-$U$ is determined by ZK demand and width ratio, not by PoW difficulty.
+$U$ is determined by whether ZK work is being performed, not by PoW difficulty.
 
 | Condition | $U$ | Rationale |
 |---|---|---|
-| Stwo Prover active, any difficulty | ≈ 67% | ZK proof, minus width overhead |
+| Stwo Prover active, any difficulty | **100%** | Every permutation advances ZK proof |
 | No ZK demand, any difficulty | 0% | Pure PoW = security only |
 
 ### 5.6 Complementary Bottleneck Structure
@@ -465,7 +464,7 @@ The simultaneous execution of PoW and STARK is possible because they bottleneck 
 | NTT unit | 0% | **100%** | **100%** |
 | SRAM bandwidth | 0% (registers only) | **100%** (memory-bound) | **100%** |
 
-Under 200 GB/s SRAM bandwidth, the STARK allocation is $f_{sym} \approx 10\%$ of Poseidon2 cycles, yielding $U_{avg} = f_{sym} \times U \approx 6.7\%$ time-averaged usefulness (see Appendix A for derivation).
+Under 200 GB/s SRAM bandwidth, $f_{sym} \approx 10\%$ of Poseidon2 cycles execute STARK Merkle hashes ($U = 100\%$); the remaining ~90% fill with Pure PoW ($U = 0\%$). See Appendix A for derivation.
 
 **Width-24 efficiency.** Width-24 compression uses 1 permutation per Merkle hash versus Width-16 sponge's 2 permutations. This halves STARK's Poseidon2 cycle consumption, freeing more cycles for PoW.
 
@@ -561,10 +560,10 @@ Four designs compared under identical die area and power budget:
 |---|---|---|---|---|---|
 | Pure PoW | 95% Pos2, 5% ctrl | ~1.9 $\mathcal{H}$ | 0 | 0% | Yes |
 | Pure Stwo | 20% Pos2, 40% NTT, 35% SRAM | 0 | $Z_{max}$ | 100% | No |
-| **ZK-SPoW** | **50% Pos2, 25% NTT, 20% SRAM** | $\mathcal{H}$ | $Z$ | **≈67%** | **Yes** |
-| ZK-SPoW+HBM | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | ≈67% | Yes |
+| **ZK-SPoW** | **50% Pos2, 25% NTT, 20% SRAM** | $\mathcal{H}$ | $Z$ | **100%** ($f_{sym}$~10%) | **Yes** |
+| ZK-SPoW+HBM | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | 100% ($f_{sym}$~60%) | Yes |
 
-Pure PoW achieves ~1.9× hashrate on a die-area basis but produces no ZK proofs ($U = 0\%$). On hashes-per-watt, the gap narrows to ~1.1–1.2× (idle NTT and SRAM contribute static leakage). Pure Stwo cannot mine. ZK-SPoW achieves $U \approx 67\%$ and mining—the 33% gap is the cost of PoW integration.
+Pure PoW achieves ~1.9× hashrate on a die-area basis but produces no ZK proofs ($U = 0\%$). On hashes-per-watt, the gap narrows to ~1.1–1.2× (idle NTT and SRAM contribute static leakage). Pure Stwo cannot mine. ZK-SPoW achieves $U = 100\%$ during STARK proving; the fraction of cycles in proving ($f_{sym}$) is SRAM-bandwidth limited (~10% for 32 MB SRAM, ~60% for HBM3).
 
 ### 7.2 Economic Dominance
 
