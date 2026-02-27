@@ -10,7 +10,7 @@ February 2026 — Version 2.0 (Draft)
 
 Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost—a direction Ball et al. [1] show faces fundamental deployment constraints. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
 
-**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographic byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
+**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
 
 We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving (proof-level: $\sim 1/N$; pure PoW: $0\%$). On ASIC, the Poseidon2 pipeline is compute-bound while STARK memory access is SRAM-limited, so the fraction of cycles in Symbiotic mode is $f_{sym} \approx 10\%$ (SRAM) to $\sim 60\%$ (HBM3), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.5). Projected zero switching overhead between modes. Security claims assume final Poseidon2 production round constants; the current Stwo implementation uses placeholder values.
 
@@ -46,7 +46,7 @@ The fundamental tension: PoW requires random exploration (nonce grinding), while
 >
 > **ZK-SPoW:** Useful ZK computation → PoW tickets as mathematical byproduct → no contradiction
 
-More precisely, ZK-SPoW is a **piggybacked coexistence**: the same Poseidon2 permutation call simultaneously advances a STARK proof and produces PoW tickets. The STARK does not *require* PoW, and the PoW does not *require* the STARK—they share hardware and computation as an amortized optimization. This differs from Ball et al.'s strict PoUW definition, where useful output is cryptographically *bound* to the PoW evidence. In ZK-SPoW, the binding is architectural (same permutation) rather than cryptographic (verifier-enforced). See §8.3 for a detailed comparison.
+More precisely, ZK-SPoW is a **hardware-symbiotic architecture**: the same Poseidon2 permutation call simultaneously advances a STARK proof and produces PoW tickets. The STARK does not *require* PoW, and the PoW does not *require* the STARK—they share hardware and computation as an amortized optimization. This differs from Ball et al.'s strict PoUW definition: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The current design does not enforce useful computation at the consensus layer. However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—providing a path to verifiable mode identification if the protocol chooses to enforce it. The binding is architectural (same permutation), observable (STARK proof evidence in mempool), and economic (ZK proof revenue). See §8.3 for a detailed comparison.
 
 **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
@@ -83,7 +83,7 @@ This resolves the fundamental tension between useful computation and memoryless 
 
 1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations, prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 via a real–ideal reduction (Theorem 1), and bound header staleness to one Merkle commitment phase (§2).
 
-2. **PoUW paradox inversion.** We formalize ZK-Symbiotic Proof of Work, where useful ZK computation naturally produces PoW tickets as a cryptographically bound byproduct—inverting the traditional PoUW direction explored by Ball et al. [1], Ofelimos [7], and Komargodski et al. [8, 9] (§1.3).
+2. **Hardware-symbiotic architecture with observable binding.** We formalize ZK-Symbiotic Proof of Work, where useful ZK computation shares hardware with PoW mining—the same Poseidon2 permutation simultaneously advances a STARK proof and produces PoW tickets. The operating mode is distinguishable via nonce format and mempool proof correlation, though not enforced at consensus (§1.3, §4.4, §8.3).
 
 3. **Width-24 Poseidon2 parameterization.** We specify Width-24 Poseidon2 over M31 in compression function mode (1 permutation per Merkle hash, vs 2 in sponge mode) and verify its security parameters: $R_p = 22$ internal rounds for 128-bit security with $d = 5$ (§6.2).
 
@@ -124,6 +124,8 @@ ZK-SPoW resolves this by defining the PoW trial at the individual permutation le
 Each evaluation produces three PoW tickets: $\text{ticket}_{j,k} = \pi(x_j)[8k:8k+7]$ for $k \in \{0, 1, 2\}$.
 
 **Assumption 1 (Input Distinctness).** The inputs $x_1, \ldots, x_P$ are pairwise distinct. In Circle STARK, Merkle tree leaves are evaluations of trace polynomials at $2^\ell$ distinct domain points; internal nodes are determined by their unique children. A collision at level $\ell > 0$ requires $\pi(x_j)[0:7] = \pi(x_{j'})[0:7]$ for distinct $x_j, x_{j'}$—probability at most $\binom{P}{2} \cdot p^{-8} \approx P^2/2^{248}$, negligible for $P \leq 10^7$. Note: this collision bound itself relies on output uniformity under PRP; Assumption 1 is therefore conditioned on the PRP assumption rather than independent of it. The conjunction "PRP + Assumption 1" is not circular: PRP guarantees pseudorandom outputs, which in turn make input collisions at higher tree levels negligible.
+
+**Remark (Malicious input injection).** Since the protocol does not verify STARK internals (§4.4), a miner could feed arbitrary—including intentionally colliding—inputs to the Poseidon2 permutation instead of genuine Merkle data. This does not undermine PoW security for two reasons: (1) **PRP holds for all inputs.** Under the PRP assumption, $\pi(x)$ is pseudorandom for *any* $x$, including adversarially chosen ones. Even if a miner feeds the same input $x$ repeatedly, each evaluation of $\pi(x)$ produces the same output—the miner gains no advantage over trying distinct inputs, which under PRP each yield independent pseudorandom outputs. Repeating inputs strictly reduces the miner's ticket count. (2) **Self-harming only.** A miner who violates Assumption 1 by using colliding inputs produces fewer *distinct* Poseidon2 evaluations, reducing their own PoW ticket count without affecting other miners. The violation is detectable only by the miner themselves and has no network-level consequence. Assumption 1 is therefore a *rational behavior assumption*, not a protocol enforcement requirement: any violation is strictly self-penalizing.
 
 **Theorem 1 (Permutation-Level Independence).** *Under the PRP assumption on Poseidon2 with security parameter $\kappa$ and Assumption 1, the joint distribution of PoW success events*
 
@@ -179,9 +181,25 @@ At throughput $R_{perm}$, phase $i$ completes in $t_i = (N_i - 1)/R_{perm}$ seco
 - **GPU** (measured): At $\ell = 20$ (trace size $2^{20}$), the largest Merkle tree has $\sim 2^{20}$ permutations. At 305 Mperm/s (Appendix C.2), $\Delta_{stale} \approx 3.4$ ms.
 - **ASIC** (projected): At $\sim 1$ Gperm/s per core with 21 cores, $R_{perm} \approx 21$ Gperm/s. $\Delta_{stale} \approx 0.05$ ms.
 
-**DAGKnight tolerance.** At 100 BPS, the block interval is 10 ms. DAGKnight accepts blocks with parent sets up to its anticone parameter (typically $\geq 10$) blocks deep, tolerating $\sim 100$ ms of latency. GPU staleness (3.4 ms) is 34% of one block interval—non-negligible but within DAGKnight's tolerance. ASIC staleness (0.05 ms) is negligible.
+**DAGKnight tolerance.** At 100 BPS, the theoretical block interval is 10 ms. However, the 10 ms figure assumes zero network propagation delay. In practice, global P2P networks exhibit propagation delays of 50–200 ms (ping RTT), and DAGKnight is specifically designed to tolerate this: its anticone parameter (typically $k \geq 10$) accepts blocks with parent sets many blocks deep, tolerating $\sim 100$+ ms of latency.
 
-**Incentive-compatible behavior.** When a new block arrives mid-phase, a rational miner faces a choice: (1) complete the current phase with the now-stale header, or (2) abandon and restart with the new header. Completing is incentive-compatible: the PoW tickets remain valid (staleness is within tolerance), and the STARK proof progress is preserved. Abandoning wastes the partial phase computation. A miner should update $h_H$ at the next natural phase boundary.
+**Staleness is the cost of Symbiotic mode.** Traditional PoW (SHA-256, kHeavyHash) has zero staleness: each hash is independent and can reference the latest header. ZK-SPoW's Symbiotic mode fixes $h_H$ for one Merkle commitment phase, introducing staleness of 3.4 ms (GPU) or 0.05 ms (ASIC). This is an inherent cost of embedding PoW within a batched STARK computation—the Merkle tree must be committed with a consistent header digest. The relevant question is whether this cost is material relative to the network propagation delays that DAGKnight already tolerates.
+
+**Quantitative impact (simulation).** We simulate a Poisson block arrival process at 100 BPS with log-normal network propagation delays, measuring anticone size (blocks concurrent with a given block) under varying staleness. $10 \times 60$ s runs per scenario:
+
+| Network delay | No staleness | ASIC (0.05 ms) | GPU (3.4 ms) | GPU $\Delta$ |
+|---|---|---|---|---|
+| LAN (5 ms) | 1.00 | 1.02 (+1.0%) | 1.68 (+67%) | +0.68 blocks |
+| Regional (20 ms) | 4.02 | 4.03 (+0.3%) | 4.70 (+17%) | +0.68 blocks |
+| Global (50 ms) | 10.05 | 10.06 (+0.1%) | 10.73 (+6.8%) | +0.68 blocks |
+| Global (100 ms) | 20.09 | 20.10 (+0.05%) | 20.77 (+3.4%) | +0.68 blocks |
+| Global (200 ms) | 40.13 | 40.14 (+0.02%) | 40.81 (+1.7%) | +0.68 blocks |
+
+The GPU staleness adds a constant ~0.68 blocks to the anticone regardless of network delay. On a realistic global network (50–200 ms propagation), this is a **1.7–6.8% marginal increase** over the baseline anticone of 10–40 blocks—well within DAGKnight's tolerance. ASIC staleness (+0.01 blocks) is unmeasurable. (Simulation source: `analysis/dagknight_staleness_sim.py`.)
+
+**Selfish mining interaction.** An attacker cannot increase a victim's staleness—$\Delta_{stale}$ is determined by the victim's own hardware. An attacker who announces blocks at STARK phase boundaries can force honest miners to restart phases, wasting partial STARK computation. However: (1) the attacker gains no PoW advantage, since the victim's PoW tickets from the stale phase remain valid; (2) the cost to the victim is at most one phase of STARK work (~3.4 ms × $f_{sym}$); (3) the attacker cannot control timing at millisecond precision over a network with 50–200 ms propagation jitter. This "phase disruption" degrades ZK throughput, not PoW security.
+
+**Incentive-compatible behavior.** When a new block arrives mid-phase, a rational miner faces a choice: (1) complete the current phase with the now-stale header, or (2) abandon and restart with the new header. Completing is incentive-compatible: the PoW tickets remain valid (staleness is within DAGKnight tolerance), and the STARK proof progress is preserved. Abandoning wastes the partial phase computation. A miner should update $h_H$ at the next natural phase boundary.
 
 **Trace size tradeoff.** Larger traces ($2^\ell$) produce more useful ZK work per proof but increase the largest Merkle tree size $N_{max}$, raising $\Delta_{stale}$. At $\ell = 20$, $\Delta_{stale} \approx 3.4$ ms (GPU); at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms, exceeding one block interval at 100 BPS. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval. On ASIC ($R_{perm} \approx 21$ Gperm/s), even $\ell = 22$ yields $\Delta_{stale} \approx 0.2$ ms—well within bounds.
 
@@ -360,7 +378,7 @@ OUTPUT (24 = 8+8+8, all visible):
 
 The same Poseidon2 hardware computes both modes. Only the input source for S[0..15] differs. **Note on full diffusion:** The Poseidon2 permutation mixes all 24 state elements through its MDS matrix every round. All output elements are functions of all input elements—the 8+8+8 labeling is a convention for reading the output, not a property of the permutation.
 
-**Note on ticket granularity.** The 3 × 8-element partition is a protocol convention, not a cryptographic constraint. Under PRP, any non-overlapping subset of the 24 output elements is pseudorandom. The default 8-element reading (248 bits) matches Stwo's hash output convention. If future hashrate growth demands finer granularity, the comparison window can be widened without modifying the hash function.
+**Note on ticket granularity: 3 tickets vs 1 ticket.** The 3 × 8-element partition is a protocol convention, not a cryptographic necessity. An alternative design reads all 24 output elements as a single 744-bit value and adjusts the difficulty target accordingly ($q_{single} = T_{744}/2^{744}$ vs $q_{triple} = 1-(1-T_{248}/2^{248})^3 \approx 3 T_{248}/2^{248}$). Both achieve equivalent expected block times via difficulty adjustment. We choose 3 × 248-bit tickets because: (1) **Stwo compatibility:** 8-element output matches the Stwo hash convention, enabling direct reuse of Merkle commitment infrastructure; (2) **Symbiotic mode constraint:** in Symbiotic mode, S[0..7] *must* be the Merkle parent (used by the STARK), so it has a designated role—the 3-ticket design naturally partitions the output into "STARK-functional" and "PoW-only" regions; (3) **Hardware simplicity:** three 248-bit comparators are smaller and faster than one 744-bit comparator. The 3-ticket design is not strictly necessary—a single-ticket design with 744-bit comparison is mathematically equivalent under PRP (Proposition 3, §6.4)—but the engineering tradeoffs favor the 3-ticket partition.
 
 ### 4.4 Block Structure
 
@@ -387,6 +405,14 @@ The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p;
 **Block hash vs PoW hash.** Block identity and PoW use separate hash functions. The block hash (e.g., Blake2b-256 for DAG references) is unchanged; only the PoW function is replaced.
 
 **STARK proofs are NOT included in the block.** They are submitted as independent transactions in the mempool, providing economic value to the ZK ecosystem (vProgs fees). This eliminates the +3–5 MB/s bandwidth overhead that would result from mandatory per-block STARK proofs at 100 BPS.
+
+**Mode distinguishability.** Although blocks do not contain STARK proofs, the operating mode (Symbiotic vs Pure PoW) is distinguishable through two independent mechanisms if the protocol chooses to use them:
+
+1. **Nonce format convention.** The protocol can define that Pure PoW nonces must zero-pad a designated region (e.g., `v2[4..7] = 0`). In Symbiotic mode, the corresponding nonce positions contain Merkle child data—Poseidon2 outputs that are zero with probability $1/p^4 \approx 2^{-124}$. A verifier inspects the nonce field in the block header: zeros in the designated region indicate Pure PoW; non-zeros indicate a Symbiotic claim. The cost is a reduction in Pure PoW nonce space from 16 to 12 elements (372 bits)—no practical impact on hashrate.
+
+2. **Mempool proof correlation.** Each STARK proof submitted to the mempool commits to Merkle trees constructed with a specific header digest $h_H$ as a salt in every node (§4.2). The verifier of the STARK proof requires $h_H$ to recompute Merkle opening paths. By matching a proof's $h_H$ against a block header, any node can verify *after the fact* that a given block was mined during Symbiotic computation for that specific header. This requires no protocol changes—the binding evidence is inherent in the STARK proof structure.
+
+Neither mechanism is mandatory for consensus. The current design treats mode distinguishability as optional: the PoW function is valid regardless of mode, and ZK revenue provides the economic incentive for Symbiotic mining. However, if future protocol evolution requires rewarding or mandating useful work, these mechanisms provide a path to verifiable mode identification without modifying the PoW function itself.
 
 ### 4.5 Header Digest Collision Resistance
 
@@ -452,7 +478,7 @@ Identical Poseidon2 pipeline, identical throughput. $U = 0\%$—no ZK proof is b
 |    SRAM data ready  -> STARK Merkle hash (Symbiotic)  |
 |    SRAM not ready   -> PoW nonce hash    (PoW)        |
 |                                                       |
-|  Switching cost: 0 cycles (combinational MUX, ~300 gates) |
+|  Switching cost: 0 throughput overhead (combinational MUX, ~300 gates; ≤1 cycle latency) |
 |  Hashrate: invariant across all modes                 |
 +-------------------------------------------------------+
 ```
@@ -463,7 +489,9 @@ The transition is **per-cycle and linear**, not a discrete mode switch. The pipe
 
 **Proposition 2.** *Total PoW hashrate $\mathcal{H}$ is independent of the operating mode.*
 
-*Argument.* $\mathcal{H} = N_{cores} \times \text{throughput\_per\_core}$. Each core's throughput is 1 hash per pipeline depth cycles (fully pipelined), regardless of input source. Input MUX adds zero latency (combinational logic). Therefore $\mathcal{H}$ is constant across all modes.
+*Argument.* $\mathcal{H} = N_{cores} \times \text{throughput\_per\_core}$. Each core's throughput is 1 hash per pipeline depth cycles (fully pipelined), regardless of input source. The input MUX is combinational logic (~300 gates, 2:1 selection on 16 × 31-bit words).
+
+**MUX critical path impact.** The MUX adds gate delay to the pipeline's first stage. At 7 nm, a 2:1 MUX contributes ~20–30 ps of propagation delay. The Poseidon2 pipeline's critical path is the S-box ($x \mapsto x^5$, requiring two M31 multiplications in series: ~200–300 ps at 7 nm). The MUX delay is <15% of the critical path—absorbable within the pipeline stage's timing margin without reducing clock frequency. If timing closure requires it, the MUX can be retimed into a dedicated pipeline stage at the cost of 1 cycle of latency (not throughput). The "zero cycles overhead" claim refers to throughput (pipelined), not latency; we clarify: **zero throughput overhead, ≤1 cycle latency overhead.**
 
 **GPU validation.** Mean Merkle/Random throughput ratio: $99.3\% \pm 0.3\%$ across 10 runs with alternating execution order (95% CI: [99.1%, 99.5%]; Appendix C.2). The 0.7% gap is statistically significant ($p = 0.006$) but attributable to GPU global memory I/O overhead in the Merkle kernel, not input-dependent Poseidon2 computation.
 
@@ -493,7 +521,11 @@ Under 200 GB/s SRAM bandwidth, $f_{sym} \approx 10\%$ of Poseidon2 cycles execut
 - **Preimage resistance:** Finding $x$ with $\pi(x)[0:7] < T$ requires $\Omega(1/p_t)$ work. This secures PoW.
 - **PRP (pseudorandom permutation):** Outputs are computationally indistinguishable from random, regardless of input structure. This secures progress-freedom (Theorem 1).
 
-These are strictly weaker assumptions than sponge-mode indifferentiability—collision/preimage resistance of a permutation is implied by, but does not require, random oracle behavior. However, the Poseidon2 literature [2, 3] primarily analyzes the sponge construction; dedicated security analysis of the bare permutation in compression function mode (e.g., against related-key or chosen-input-output attacks specific to this mode) is less mature. We consider this acceptable because: (1) the 30-round permutation's algebraic properties (S-box degree, MDS diffusion, round count margins) are mode-independent; (2) compression function mode exposes strictly more information to the attacker (no hidden capacity), making it a harder target—any attack on the compression function implies an attack on the sponge with equal or lower complexity.
+These are strictly weaker assumptions than sponge-mode indifferentiability—collision/preimage resistance of a permutation is implied by, but does not require, random oracle behavior. The Poseidon2 literature [2, 3] primarily analyzes the sponge construction, raising a natural question: does the round count $R_p = 22$ assume the existence of hidden capacity elements?
+
+**Round count is capacity-independent.** We verify from Plonky3's source [10] that the round number calculation depends on exactly four parameters: field prime $p$, state width $t$, S-box degree $d$, and security level $M$. Capacity does not appear. The six security constraints (statistical, interpolation, three Gröbner basis variants, and the algebraic bound from [15]) target the *permutation itself*—they bound the number of rounds needed to resist distinguishing attacks against $\pi$, not against a sponge construction built from $\pi$. Capacity $c$ is a separate, orthogonal parameter that determines sponge-mode security as $\min(\text{permutation security}, 2^{c/2})$. For compression function mode, only permutation security applies, and $R_p = 22$ (with margin $R_f += 2$, $R_p \times 1.075$) targets 128-bit permutation security directly.
+
+**Compression function mode risks.** While the round count is sound, operating without capacity has two consequences: (1) the full 744-bit state is visible, giving an attacker more information for algebraic cryptanalysis (e.g., CICO attacks [12] become formulated over the full state rather than a reduced output space); (2) there is no "safety net"—in sponge mode, even a partial permutation break may be absorbed by the capacity, whereas in compression mode any permutation weakness directly impacts security. We consider this acceptable because: (a) the 30-round configuration's algebraic properties (S-box degree growth, MDS diffusion) are mode-independent; (b) the Poseidon2 paper [3] explicitly recommends compression function mode for Merkle trees; (c) any attack on the compression function implies an attack on the sponge with equal or lower complexity (strictly more information available to the attacker).
 
 **Single primitive dependency.**
 
@@ -517,7 +549,7 @@ These are strictly weaker assumptions than sponge-mode indifferentiability—col
 
 **Preimage resistance (PoW security).** The 30-round Poseidon2 permutation (8 external + 22 internal) satisfies this: no known attack reduces preimage search below the generic $2^{248}$ bound.
 
-**$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10], which applies constraints from [2, 3] plus the algebraic attack bound from Ashur, Buschman, and Mahzoun [15], with margin $R_f += 2$, $R_p \times 1.075$. Total rounds: 30 (8 + 22). S-box operations: 214 per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs 2 × 142 = 284). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$, above the $2^{64}$ threshold for 128-bit interpolation security.
+**$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10]. The formula applies six security constraints from [2, 3] (statistical, interpolation, three Gröbner basis variants) plus the algebraic attack bound from [15], then adds margin: $R_f += 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraint is statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$). **Crucially, the formula depends only on $(p, t, d, M)$—capacity is not a parameter** (see §6.1). Total rounds: 30 (8 + 22). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$, above the $2^{64}$ threshold for 128-bit interpolation security.
 
 **Recent cryptanalysis.** See §6.1 (Current margin) for detailed analysis of [12] and [13].
 
@@ -575,7 +607,19 @@ $$\text{ZK-SPoW} = \frac{\mathcal{H}_{spow}}{\mathcal{H}_{total}} \cdot B + Z \c
 
 where $\mathcal{H}_{pow}/\mathcal{H}_{spow} \approx 1.1\text{–}1.2$ per watt. ZK-SPoW dominates when $Z \cdot F$ exceeds the ~10–20% mining revenue gap.
 
-**PoW security without ZK demand.** When $Z \cdot F = 0$, the ASIC operates as a conventional PoW miner with a hash/watt disadvantage due to die area overhead. Difficulty adjustment absorbs this. The overhead is the cost of optionality—it purchases the ability to capture ZK revenue when the market emerges.
+**Equilibrium condition.** Let $\alpha \approx 1.1\text{–}1.2$ be the Pure PoW hash/watt advantage. ZK-SPoW ASICs survive in equilibrium when:
+
+$$Z \cdot F \geq (\alpha - 1) \cdot \frac{\mathcal{H}_{spow}}{\mathcal{H}_{total}} \cdot B$$
+
+i.e., per-miner ZK revenue exceeds the ~10–20% mining revenue gap. Let $D$ be the network-wide ZK proof demand (proofs/s) and $N_{spow}$ the number of ZK-SPoW miners, each with throughput $Z$. In steady state $N_{spow} \cdot Z \leq D$ (excess proving capacity earns no revenue). The critical demand threshold is:
+
+$$D_{min} = N_{spow} \cdot Z \cdot \mathbb{1}[Z \cdot F \geq (\alpha-1) \cdot B/N]$$
+
+**Demand scarcity risk.** If $D \ll N_{spow} \cdot Z$, most ZK-SPoW cycles execute in Pure PoW mode ($U_{sys} \approx 0\%$), and ZK revenue per miner drops to $F \cdot D / N_{spow}$. When this falls below $(\alpha-1) \cdot B/N$, Pure PoW ASICs dominate, and rational miners abandon ZK-SPoW hardware—a collapse scenario. This is the fundamental macro-economic risk: **ZK-SPoW's usefulness depends on external ZK demand matching a significant fraction of the network's proving capacity.**
+
+**Order-of-magnitude estimate.** A Kaspa-scale network with $N_{spow} = 10{,}000$ ASICs at $Z = 260$ proofs/s (Appendix A) produces ~2.6M proofs/s of aggregate capacity. Current blockchain ZK demand (rollup proofs, zkVMs) is orders of magnitude below this. ZK-SPoW viability therefore requires either: (1) a sustained, large-scale ZK proof market (e.g., universal zkVM proving as a service), or (2) protocol-level subsidization of ZK proving alongside block rewards. Neither condition is guaranteed.
+
+**PoW security without ZK demand.** When $Z \cdot F = 0$, the ASIC operates as a conventional PoW miner with a hash/watt disadvantage due to die area overhead. Difficulty adjustment absorbs this. The overhead is the cost of optionality—it purchases the ability to capture ZK revenue when the market emerges. Network security is never compromised by insufficient ZK demand; only the economic advantage of ZK-SPoW hardware is affected.
 
 ---
 
@@ -619,10 +663,12 @@ Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. ZK-SP
 | Ball et al. criterion | PoW → useful (their framework) | Useful → PoW (ZK-SPoW) |
 |---|---|---|
 | PoW produces useful output | Partial | **Yes**: every Symbiotic permutation advances a STARK proof |
-| Verifier confirms usefulness | Not enforced | Verifiable: STARK proofs are publicly checkable |
-| Useful output bound to PoW | Not enforced | **Architectural**: same permutation produces both (not cryptographically enforced by the verifier) |
+| Verifier confirms usefulness | Not enforced | **Distinguishable but not enforced**: mode is identifiable via nonce format and mempool proof correlation (§4.4), but consensus does not require it |
+| Useful output bound to PoW | Not enforced | **Architectural + observable**: same permutation produces both; STARK proof in mempool contains `h_H` binding evidence (§4.4) |
 
-Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by reversing the direction—useful computation happens to produce PoW-valid outputs. However, the binding between PoW and useful output is architectural (shared permutation call) rather than cryptographic (verifier-enforced). A miner *could* run Pure PoW mode exclusively, producing no useful output. The economic incentive for Symbiotic mode comes from ZK proof revenue, not from protocol enforcement. ZK-SPoW is therefore best characterized as **amortized coexistence** rather than strict PoUW in the Ball et al. sense.
+**Mode distinguishability without enforcement.** Blocks do not contain STARK proofs, but the operating mode is *not* indistinguishable. Two mechanisms allow mode identification (§4.4): (1) a nonce format convention that makes Pure PoW blocks identifiable from the header alone, and (2) mempool STARK proofs whose Merkle commitments contain the block's `h_H` as a salt, providing after-the-fact cryptographic evidence of Symbiotic mining. The current design treats these as optional—consensus validity depends only on the PoW hash, and economic incentives (ZK proof revenue) drive Symbiotic adoption. However, these mechanisms mean the protocol *could* enforce or reward useful work in future iterations without modifying the PoW function.
+
+Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by reversing the direction: useful computation happens to produce PoW-valid outputs. The binding is architectural (same permutation call) and observable (STARK proof evidence), though not currently enforced at the consensus layer. A miner *could* run Pure PoW mode exclusively, forgoing ZK revenue. ZK-SPoW is best characterized as a **hardware-symbiotic architecture** with a **path to verifiable PoUW**—the evidence infrastructure exists; enforcement is a policy decision.
 
 ### 8.4 Memorylessness Comparison
 
@@ -632,15 +678,15 @@ See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW sc
 
 ## 9. Open Questions
 
-1. **$R_p$ for Width-24: independent verification needed.** $R_p = 22$ is computed via Plonky3's round number formula [10], which applies bounds from [2, 3, 15] with margins $R_f += 2$, $R_p \times 1.075$. The specific computation for Width-24, M31, $d = 5$ has not been independently verified by a dedicated cryptanalysis. Until such verification is performed, the 128-bit security claim for the 30-round configuration should be considered provisional (§6.2).
+1. **Compression function mode: dedicated cryptanalysis.** We verify that Plonky3's $R_p = 22$ formula targets permutation-level security independent of capacity (§6.1, §6.2). However, the Poseidon2 cryptanalysis literature [2, 3, 12, 15] primarily evaluates sponge-mode usage. A dedicated analysis of algebraic attack complexity against the bare Width-24 permutation in compression function mode—specifically, CICO attacks [12] over the full 744-bit state and Gröbner basis complexity without capacity reduction—would strengthen the 128-bit security claim. Until such analysis, the claim should be considered well-founded but not independently verified for this specific mode.
 
 2. **Memoryless validation.** Empirical verification of Poisson block inter-arrival times in a test network running ZK-SPoW would complement the theoretical analysis of §2.
 
 3. **Output quality under production constants.** The GPU experiments (Appendix C) use placeholder round constants. Statistical testing of output pseudorandomness (e.g., NIST SP 800-22) under production Poseidon2 constants would validate that the PRP assumption holds in practice, not only in theory.
 
-4. **Equilibrium analysis.** The Pareto analysis (§7) is a static comparison. A dynamic equilibrium analysis—ZK-SPoW ASICs vs Pure PoW ASICs under varying ZK demand, including the 10–20% hash/watt disadvantage when ZK demand is insufficient—would strengthen the economic argument. Related: the source and stability of ZK proof demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
+4. **ZK demand viability.** §7.2 derives the equilibrium condition and demand scarcity risk. The critical open question is whether sustained ZK proof demand at the required scale ($\gtrsim 10^5$ proofs/s network-wide) will materialize. A dynamic simulation of ZK-SPoW vs Pure PoW ASIC competition under stochastic ZK demand—including miner entry/exit dynamics and difficulty adjustment feedback—would quantify the collapse threshold more precisely. The source of demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
 
-5. **Selfish mining interaction.** The interaction between Symbiotic mode and selfish mining (or block withholding) in DAG-based consensus has not been analyzed. A miner who discovers a PoW ticket mid-phase faces strategic choices (submit immediately vs. withhold) that may interact with STARK proof progress.
+5. **Full DAGKnight consensus simulation.** §2.3 simulates anticone size impact (1.7–6.8% marginal increase for GPU, unmeasurable for ASIC). A full DAGKnight consensus simulation—modeling blue set selection, confirmation times, and throughput under heterogeneous staleness—would provide stronger quantitative guarantees. The "phase disruption" attack (§2.3) warrants game-theoretic analysis, though its practical feasibility is limited by network propagation jitter (50–200 ms).
 
 **Resolved.** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) are resolved under the PRP assumption.
 
@@ -687,6 +733,8 @@ $f_{sym}$ scales with memory bandwidth:
 | HBM3E 16 GB | 2.4 TB/s | ~100%† | ~2,625† |
 
 †Compute-saturated: STARK fraction caps at 100%.
+
+**NoC area and power.** Delivering 200 GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7 nm, a 200 GB/s mesh NoC (e.g., ring or 2D mesh topology) consumes approximately 1–3% of die area and 0.5–1.5 W, depending on topology and wire length. The 5% Control & I/O budget (§A.1) is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7–10% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50% to ~47% (20 cores instead of 21). This is a ~5% hashrate reduction—non-negligible but does not qualitatively change the Pareto analysis (§7). The die allocation in §A.1 should be considered approximate; detailed physical design is beyond this paper's scope.
 
 ---
 
