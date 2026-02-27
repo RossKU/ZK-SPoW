@@ -657,144 +657,47 @@ ZK-SPoW is the only ZK-based PoW scheme that achieves the same progress-free pro
 
 ---
 
-## Appendix A: ASIC Architecture Details
+## Appendix A: ASIC Architecture Estimates
 
-*Note: All parameters in this appendix are reference estimates for a hypothetical design. No chip has been fabricated.*
+*All parameters are reference estimates for a hypothetical 7 nm design. No chip has been fabricated.*
 
-### A.1 ZK-Symbiotic ASIC Block Diagram
+### A.1 Die Allocation
 
-```
-+-- ZK-SPoW ASIC (7nm, ~200W) -----------------------------------------+
-|                                                                        |
-|  +-- Poseidon2 Core Array (50% die) --------------------------------+ |
-|  |  [Core 0] [Core 1] [Core 2] ... [Core N-1]                       | |
-|  |  Each: Width-24 pipeline (M31), per-cycle MUX                     | |
-|  |                                                                    | |
-|  |  +---------+     +------------------+   +----------+              | |
-|  |  |Input MUX|---->|Poseidon2 Pipeline|-->|Output RTR|              | |
-|  |  +--+--+---+     | [R1][R2]...[R30] |   +--+---+---+              | |
-|  |     |  |          +------------------+      |   |                  | |
-|  |  SRAM  nonce                           SRAM  target               | |
-|  |  data  counter                         write comparator            | |
-|  +--------------------------------------------------------------------+ |
-|                                                                        |
-|  +-- NTT Butterfly Unit (25% die) ----------------------------------+ |
-|  |  M31 multiply-accumulate array. STARK: LDE + FRI folding          | |
-|  +--------------------------------------------------------------------+ |
-|                                                                        |
-|  +-- SRAM (20% die) ------------------------------------------------+ |
-|  |  32 MB on-chip, ~200 GB/s bandwidth                                | |
-|  +--------------------------------------------------------------------+ |
-|                                                                        |
-|  +-- Control & I/O (5% die) ----------------------------------------+ |
-|  |  PoW controller, STARK controller, scheduler, network interface    | |
-|  +--------------------------------------------------------------------+ |
-+------------------------------------------------------------------------+
-```
-
-### A.2 M31 Field Arithmetic
-
-```
-a, b in F_p  where p = 2^31 - 1
-c = a * b                      // 31 x 31 -> 62-bit product
-c_hi = c[61:31]                // upper 31 bits
-c_lo = c[30:0]                 // lower 31 bits
-result = c_hi + c_lo           // Mersenne reduction
-if result >= p: result -= p    // final correction
-```
-
-| Metric | M31 | Goldilocks ($2^{64} - 2^{32} + 1$) |
+| Block | Die share | Function |
 |---|---|---|
-| Multiplier width | 31 × 31 → 62 bit | 64 × 64 → 128 bit |
-| Reduction | 1 addition | shift + sub + add |
-| Gate count | ~1,000 | ~3,500 |
-| Latency | 1 cycle | 2–3 cycles |
-| Area ratio | **1×** | 3.5× |
+| Poseidon2 core array | 50% | Width-24 pipelines (M31), per-cycle input MUX (SRAM data / nonce) |
+| NTT butterfly unit | 25% | M31 multiply-accumulate: LDE + FRI folding |
+| SRAM | 20% | 32 MB on-chip, ~200 GB/s bandwidth |
+| Control & I/O | 5% | PoW/STARK schedulers, network interface |
 
-**M31 advantage:** 3.5× more multipliers per die → 3.5× more Poseidon2 cores.
+### A.2 Core Sizing
 
-### A.3 S-box and MDS
+A fully pipelined Width-24 Poseidon2 core (30 rounds: 8 external + 22 internal) requires ~1.4M gates. On a 60M-gate die with 50% allocated to Poseidon2: **21 cores at ~1 Gperm/s each → 63G effective PoW hash/s** (3 tickets per permutation).
 
-**S-box ($x^5 \bmod p$):** 3 sequential multiplications (x² → x⁴ → x⁵). Gate count: ~3,000 (M31).
+M31 multipliers (~1K gates, 31×31 bit) are 3.5× smaller than Goldilocks (~3.5K gates, 64×64 bit), giving 3.5× more cores per die at equivalent area.
 
-**External MDS:** Block-circulant M4 structure. Width 24 = 6 groups of 4. Full external MDS: circ(2M4, M4, ..., M4)—all arithmetic is shift+add only.
+### A.3 SRAM Bandwidth and $f_{sym}$
 
-**Internal MDS:** Sparse: $M_I = \mathbf{1}\mathbf{1}^\top + \text{diag}(V)$, $V = [-2, 1, 2, 4, \ldots, 2^{22}]$ (Plonky3 values). Width 24: 24 shift-add operations per internal round (+50% vs Width 16).
+Each Merkle hash requires 96 bytes of SRAM I/O (32 read left + 32 read right + 32 write parent).
 
-### A.4 Per-Round Gate Counts
+$$f_{sym} = \frac{\text{SRAM bandwidth} / 96}{\text{total Poseidon2 throughput}} = \frac{200\text{G}/96}{21\text{G}} \approx 9.9\%$$
 
-| Component | External round (×8) | Internal round (×22) |
-|---|---|---|
-| S-box | 24 × 3K = 72K gates | 1 × 3K = 3K gates |
-| MDS | M4 blocks (~12K gates) | diag + 11ᵀ (~24K gates) |
-| Round constants | 24 × 100 = 2.4K | 1 × 100 = 0.1K |
-| **Subtotal** | **~86K gates** | **~27K gates** |
+| Metric | Value |
+|---|---|
+| STARK hash throughput | ~2.08G hash/s (SRAM-limited) |
+| PoW hashrate | ~63G effective (fills idle cycles) |
+| STARK proofs/sec | ~260 |
 
-**Total core (pipelined):** 8 × 86K + 22 × 27K = 688K + 594K ≈ **1,282K gates (Width 24)**. Standard Width 16: ~730K gates. Overhead: +76% core logic.
+$f_{sym}$ scales with memory bandwidth:
 
-### A.5 Pipeline Design Options
+| Memory | Bandwidth | $f_{sym}$ | Proofs/sec |
+|---|---|---|---|
+| SRAM 32 MB | 200 GB/s | ~10% | ~260 |
+| SRAM 64 MB | 400 GB/s | ~20% | ~520 |
+| HBM3 8 GB | 1.2 TB/s | ~60% | ~1,560 |
+| HBM3E 16 GB | 2.4 TB/s | ~100%† | ~2,625† |
 
-Assuming 60M gate die, 50% allocated to Poseidon2 cores (30M gates). Each permutation produces 3 PoW tickets:
-
-| Pipeline style | Gates/core | Cores | Perm/sec/core | Effective hash/sec |
-|---|---|---|---|---|
-| Folded (×1) | 86K | 348 | 33M | **35G** |
-| 5-stage | 300K | 100 | 167M | **50G** |
-| 10-stage | 550K | 54 | 333M | **54G** |
-| Full (×30) | 1.4M | 21 | 1G | **63G** |
-
-### A.6 SRAM Bandwidth and Throughput Allocation
-
-Each Poseidon2 Merkle hash requires 96 bytes (32 read left + 32 read right + 32 write parent).
-
-$$\text{SRAM bandwidth} \approx 200 \text{ GB/s}$$
-$$\text{STARK hash throughput} = 200\text{G}/96 \approx 2.08\text{G hash/sec}$$
-$$\text{Total Poseidon2 throughput} \approx 21\text{G perm/sec (21 cores @ 1 GHz)}$$
-$$f_{sym} = 2.08/21 \approx 9.9\%$$
-
-| Metric | Value | Note |
-|---|---|---|
-| Hardware STARK fraction ($f$) | ~10% | SRAM-bandwidth limited |
-| Hardware PoW fraction | ~90% | Fills idle Poseidon2 cycles |
-| $U$ (usefulness) | ≈ 67% | $t_0/t = 16/24$ |
-| STARK proofs/sec | ~260 | 2.08G / 8M hashes per proof |
-| PoW hashrate | ~63G effective | 21G perm/sec × 3 tickets |
-| $U_{avg}$ | ≈ 6.7% | $f \times U = 0.10 \times 0.67$ |
-
-$U_{avg}$ scales with memory bandwidth:
-
-| Memory technology | Bandwidth | $f$ | $U_{avg}$ | Proofs/sec |
-|---|---|---|---|---|
-| SRAM 32 MB | 200 GB/s | ~10% | ~6.7% | ~260 |
-| SRAM 64 MB | 400 GB/s | ~20% | ~13% | ~520 |
-| HBM3 8 GB | 1.2 TB/s | ~60% | ~40% | ~1,560 |
-| HBM3E 16 GB | 2.4 TB/s | ~100%† | ~67% | ~2,625† |
-
-†At 2.4 TB/s, SRAM exceeds compute capacity; STARK fraction saturates at 100%.
-
-### A.7 Die Area: kHeavyHash vs Poseidon2-PoW
-
-| Metric | kHeavyHash ASIC | Poseidon2-PoW (Width 24) |
-|---|---|---|
-| Core area | ~150K gates | ~1.4M gates |
-| Cores (60M gate die) | ~380 (95% utilized) | ~21 (50% allocated) |
-| Throughput per core | ~1G/s | ~1G perm/s → 3G eff/s |
-| Total chip hashrate | ~380G/s | ~63G/s effective |
-| ZK proof capability | None | ~260 proofs/sec |
-
-Poseidon2 has ~6× lower PoW hashrate per die. **This is absorbed by difficulty adjustment**—all miners use the same hash function.
-
-### A.8 M31 vs Goldilocks
-
-| Metric | Goldilocks | M31 |
-|---|---|---|
-| Element size | 64 bits | 31 bits |
-| Multiplier gates | ~3,500 | ~1,000 |
-| Poseidon2 width (ext.) | 12 | 24 |
-| Hash output | 256 bits | 248 bits |
-| STARK ecosystem | Plonky2/Plonky3 | **Stwo (potential Kaspa choice)** |
-
-**M31 is the natural choice** if Kaspa adopts Stwo.
+†Compute-saturated: STARK fraction caps at 100%.
 
 ---
 
