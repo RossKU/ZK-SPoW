@@ -10,7 +10,7 @@ February 2026 — Version 2.0 (Draft)
 
 Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost—a direction Ball et al. [1] show faces fundamental deployment constraints. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
 
-**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographic byproduct. This inversion resolves the non-memoryless problem—each Poseidon2 permutation within the STARK is an independent PoW trial under the PRP assumption, yielding Bernoulli trials at nanosecond granularity rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
+**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a cryptographic byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
 
 We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, $U = 100\%$ during continuous proving (proof-level: $\sim 1/N$; pure PoW: $0\%$), zero switching overhead between compute-bound PoW and memory-bound STARK proving. Security claims assume final Poseidon2 production round constants; the current Stwo implementation uses placeholder values.
 
@@ -71,13 +71,13 @@ However, ZK-SPoW does not use proof completion as the PoW event. Instead, **each
 - The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
 - Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
 
-**Result:** ZK-SPoW is progress-free despite embedding PoW within a stateful computation. Block discovery follows a Poisson process, preserving the security assumptions of Nakamoto-style and DAG-based consensus.
+**Result:** ZK-SPoW is computationally progress-free (Definition 2, §2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption, preserving the security assumptions of Nakamoto-style and DAG-based consensus.
 
 This resolves the fundamental tension between useful computation and memoryless PoW—not by making the computation memoryless, but by extracting PoW at a granularity where the PRP assumption guarantees independence.
 
 ### 1.5 Contributions
 
-1. **Memoryless PoW from non-memoryless computation.** We formalize the progress-free property for PoW schemes embedded in stateful computations, prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2, and bound header staleness to one Merkle commitment phase (§2).
+1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations, prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 via a real–ideal reduction (Theorem 1), and bound header staleness to one Merkle commitment phase (§2).
 
 2. **PoUW paradox inversion.** We formalize ZK-Symbiotic Proof of Work, where useful ZK computation naturally produces PoW tickets as a cryptographically bound byproduct—inverting the traditional PoUW direction explored by Ball et al. [1], Ofelimos [7], and Komargodski et al. [8, 9] (§1.3).
 
@@ -101,7 +101,11 @@ $$P(\tau_{n+1} \text{ succeeds} \mid o_1, \ldots, o_n) = P(\tau_{n+1} \text{ suc
 
 where $q$ is a fixed parameter determined by the difficulty target $T$. Equivalently, the success events form an i.i.d. Bernoulli($q$) sequence. Progress-free trials at rate $R = N \cdot H$ yield Poisson block arrivals with rate $\lambda = Rq$—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
 
-SHA-256 and kHeavyHash achieve this trivially under the random oracle model. STARK proof generation does not: it is stateful (trace → NTT → Merkle → Fiat-Shamir → FRI), and if proof completion is the PoW event, a miner at 80% completion has higher conditional success probability than one at 10%.
+SHA-256 and kHeavyHash achieve Definition 1 information-theoretically under the random oracle model. For computational primitives like Poseidon2, the random oracle model does not apply. We introduce a computational relaxation:
+
+**Definition 2 (Computationally Progress-Free PoW).** A PoW scheme is *computationally progress-free* with security parameter $\kappa$ if no probabilistic polynomial-time (PPT) adversary can distinguish the joint distribution of trial outcomes $(o_1, \ldots, o_n)$ from an i.i.d. Bernoulli($q$) sequence with non-negligible advantage in $\kappa$.
+
+STARK proof generation is not even computationally progress-free at the proof level: it is stateful (trace → NTT → Merkle → Fiat-Shamir → FRI), and if proof completion is the PoW event, a miner at 80% completion has higher conditional success probability than one at 10%—a distinction any observer can make without breaking any cryptographic assumption.
 
 ### 2.2 Permutation-Level Independence
 
@@ -115,27 +119,41 @@ ZK-SPoW resolves this by defining the PoW trial at the individual permutation le
 
 Each evaluation produces three PoW tickets: $\text{ticket}_{j,k} = \pi(x_j)[8k:8k+7]$ for $k \in \{0, 1, 2\}$.
 
-**Theorem 1 (Permutation-Level Independence).** *Under the PRP assumption on Poseidon2, the PoW success events*
+**Assumption 1 (Input Distinctness).** The inputs $x_1, \ldots, x_P$ are pairwise distinct. In Circle STARK, Merkle tree leaves are evaluations of trace polynomials at $2^\ell$ distinct domain points; internal nodes are determined by their unique children. A collision at any level requires $\pi(x_j)[0:7] = \pi(x_{j'})[0:7]$ for distinct $x_j, x_{j'}$—probability at most $\binom{P}{2} \cdot p^{-8} \approx P^2/2^{248}$, negligible for $P \leq 10^7$.
+
+**Theorem 1 (Permutation-Level Independence).** *Under the PRP assumption on Poseidon2 with security parameter $\kappa$ and Assumption 1, the joint distribution of PoW success events*
 
 $$E_j = \{\exists\, k \in \{0,1,2\} : \text{ticket}_{j,k} < T\}, \quad j = 1, \ldots, P$$
 
-*are mutually independent Bernoulli($q$) trials with $q = 1 - (1-p_t)^3$, $p_t = T/2^{248}$.*
+*is computationally indistinguishable from an i.i.d. Bernoulli($q$) sequence, with $q = 1 - (1-p_t)^3$, $p_t = T/2^{248}$. That is, for any PPT distinguisher $\mathcal{D}$:*
 
-*Proof.* We establish two properties:
+$$|\Pr[\mathcal{D}(E_1, \ldots, E_P) = 1] - \Pr[\mathcal{D}(B_1, \ldots, B_P) = 1]| \leq \mathrm{negl}(\kappa)$$
 
-**(a) Input distinctness.** In a Merkle tree, two internal nodes $j \neq j'$ have $x_j \neq x_{j'}$ unless $n_{L,j} = n_{L,j'}$ and $n_{R,j} = n_{R,j'}$. Since child hashes are outputs of $\pi$ at the previous level (or leaf values), a collision requires finding distinct inputs that produce identical 248-bit outputs—probability at most $\binom{P}{2} \cdot 2^{-248}$, negligible for $P \leq 10^7$.
+*where $B_1, \ldots, B_P \stackrel{i.i.d.}{\sim} \mathrm{Bernoulli}(q)$.*
 
-**(b) PRP implies joint pseudorandomness.** For distinct inputs $x_1, \ldots, x_P$, the PRP property guarantees that $(\pi(x_1), \ldots, \pi(x_P))$ is computationally indistinguishable from $(y_1, \ldots, y_P)$ where each $y_j$ is drawn uniformly from $\mathbb{F}_p^{24}$.
+*Proof.* We proceed via a real–ideal argument.
 
-**(c) Independence from uniformity.** If each $y_j$ is uniform over $\mathbb{F}_p^{24} = \mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$, then the three 8-element projections are mutually independent (standard property of product probability spaces), each uniform over $\mathbb{F}_p^8$. The event $\{y_j[0:7] < T\}$ has probability $p_t = T/2^{248}$, and the three tickets within permutation $j$ are independent. Hence $P(E_j) = 1-(1-p_t)^3 = q$.
+**Real world.** The prover evaluates $\pi(x_1), \ldots, \pi(x_P)$ on distinct inputs (Assumption 1) and derives events $E_1, \ldots, E_P$.
 
-**(d) Inter-permutation independence.** Since the $y_j$ are independent across distinct $j$ (they are independent uniform samples), the events $E_j$ are independent.
+**Ideal world.** Replace $\pi$ with a truly random function $f: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$. For distinct inputs, the outputs $f(x_1), \ldots, f(x_P)$ are mutually independent and each uniform over $\mathbb{F}_p^{24}$. In this world:
 
-Combining (a)–(d): the events $\{E_j\}_{j=1}^P$ are i.i.d. Bernoulli($q$). ∎
+**(a) Intra-permutation independence.** Each $f(x_j)$ is uniform over $\mathbb{F}_p^{24} = \mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$. The three 8-element projections are mutually independent (product probability space), each uniform over $\mathbb{F}_p^8$. The event $\{\text{ticket}_{j,k} < T\}$ has probability $p_t = T/2^{248}$. Hence $P(E_j) = 1-(1-p_t)^3 = q$.
 
-**Corollary 1.** *ZK-SPoW is progress-free. Block discovery follows a Poisson process.* A miner's "progress" through the STARK carries no information about future PoW success—each permutation is an independent trial regardless of its position in the proof.
+**(b) Inter-permutation independence.** For distinct inputs, the outputs $f(x_j)$ are independent, so the events $E_j$ are independent.
 
-**Remark on structured inputs.** Merkle tree feedback (parent outputs become child inputs) and Fiat-Shamir cascades (trace selection affects FRI trees) create structured, non-i.i.d. permutation inputs. This does not violate Theorem 1: PRP guarantees pseudorandom outputs regardless of input structure—any weakness would constitute a Poseidon2 break. The total ticket count $P$ is trace-independent (§6.3).
+Thus in the ideal world, $\{E_j\}_{j=1}^P$ are i.i.d. Bernoulli($q$).
+
+**Indistinguishability.** By the PRP assumption, no PPT adversary can distinguish $(\pi(x_1), \ldots, \pi(x_P))$ from $(f(x_1), \ldots, f(x_P))$ for distinct inputs. Since each $E_j$ is a deterministic function of the corresponding output, any PPT distinguisher for the event sequences can be composed with the event-extraction function to yield a PPT distinguisher for the outputs—contradicting the PRP assumption. ∎
+
+**Remark (PRP–PRF switching).** A PRP is a permutation: distinct inputs yield distinct outputs, introducing a negligible anti-correlation absent in a random function. The statistical distance between a random permutation and a random function on $P$ queries is at most $\binom{P}{2}/|\mathbb{F}_p^{24}| \approx P^2/2^{744}$, negligible for any practical $P$. This is the standard PRP–PRF switching lemma; the proof above absorbs this cost into $\mathrm{negl}(\kappa)$.
+
+**Remark on structured inputs.** Merkle tree feedback (parent outputs become child inputs) and Fiat-Shamir cascades (trace selection affects FRI trees) create structured, non-i.i.d. permutation inputs. This does not violate Theorem 1: the PRP guarantee holds for *any* sequence of distinct inputs, regardless of how they are generated—any weakness for structured inputs would constitute a Poseidon2 break. The total ticket count $P$ is trace-independent (§6.3).
+
+**Corollary 1 (Computational Progress-Freedom).** *Under the PRP assumption, ZK-SPoW is computationally progress-free (Definition 2). Consequently, block discovery is computationally indistinguishable from a Poisson process.*
+
+*Proof.* By Theorem 1, the PoW events are computationally indistinguishable from i.i.d. Bernoulli($q$). Any PPT consensus adversary $\mathcal{A}$ that gains non-negligible advantage (e.g., disproportionate mining share) by exploiting non-Poisson block arrivals must implicitly distinguish the real trial sequence from the ideal i.i.d. sequence. Formally: given $\mathcal{A}$ with advantage $\epsilon(\kappa)$ under real events but advantage $0$ under i.i.d. events, we construct a distinguisher $\mathcal{D}$ with advantage $\geq \epsilon(\kappa)$ by running $\mathcal{A}$ on the challenge sequence—contradicting Theorem 1 if $\epsilon$ is non-negligible.
+
+A miner's "progress" through the STARK carries no computationally detectable information about future PoW success. Nakamoto-style and DAG-based consensus security proofs model block arrivals as Poisson; under the PRP assumption, no PPT adversary can exploit any deviation from this model. ∎
 
 ### 2.3 Header Staleness Bound
 
@@ -165,13 +183,13 @@ The key differentiator of ZK-SPoW is the *granularity* at which PoW operates wit
 |---|---|---|---|---|
 | PoW granularity | 1 hash = 1 trial | 1 proof = 1 ticket | Proof → hash | **1 perm = 1 trial** |
 | Trial duration | Nanoseconds | Tens of ms–s | Seconds + μs | **Nanoseconds** |
-| Progress-free? | **Yes** | **No** — sunk cost | Partially | **Yes** (PRP) |
+| Progress-free? | **Yes** (info-theoretic) | **No** — sunk cost | Partially | **Yes** (computational, PRP) |
 | Max staleness | 0 (stateless) | Proof duration | Proof duration | **~3 ms (measured)** |
 | Losing miners' work | Security only | Proofs discarded | Proofs discarded | **ZK work preserved** |
 | Useful work | None | Proof = PoW | Proof then hash | **Perm = PoW + ZK** |
 | $U$ | 0% | $\sim 1/N$ | $\sim 1/N$ | **100%** |
 
-ZK-SPoW operates at the finest possible granularity—individual permutations (nanoseconds)—achieving the same progress-free property as traditional hash-based PoW. The STARK proof continues regardless of PoW outcomes: losing miners' ZK computation is preserved, not discarded.
+ZK-SPoW operates at the finest possible granularity—individual permutations (nanoseconds)—achieving computational progress-freedom equivalent to the information-theoretic progress-freedom of traditional hash-based PoW (Definition 2, §2.1). The STARK proof continues regardless of PoW outcomes: losing miners' ZK computation remains useful.
 
 ---
 
@@ -499,7 +517,7 @@ Under PRP, three invariants hold:
 
 The three PoW tickets from a single permutation are deterministically linked but computationally independent under PRP.
 
-**Proposition 3.** *Under the PRP assumption, $\text{ticket}_0 = S[0..7]$, $\text{ticket}_1 = S[8..15]$, and $\text{ticket}_2 = S[16..23]$ are mutually independent, each with success probability $p_t = T/2^{248}$. The per-permutation success probability is $q = 1 - (1-p_t)^3$.*
+**Proposition 3.** *Under the PRP assumption, the joint distribution of $\text{ticket}_0 = S[0..7]$, $\text{ticket}_1 = S[8..15]$, and $\text{ticket}_2 = S[16..23]$ is computationally indistinguishable from three mutually independent uniform samples over $\mathbb{F}_p^8$, each with success probability $p_t = T/2^{248}$. The per-permutation success probability is $q = 1 - (1-p_t)^3$.*
 
 No early-termination optimization exists: evaluating any ticket requires the full permutation, which produces all three simultaneously. Any statistical test detecting inter-ticket correlation can be converted into a PRP distinguisher with equal advantage. Full proof in Appendix B.7.
 
@@ -586,7 +604,7 @@ Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW s
 
 ### 8.4 Memorylessness Comparison
 
-See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW scheme that achieves the same progress-free property as traditional hash-based PoW, while simultaneously producing useful computation. The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on SHA-256/kHeavyHash.
+See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW scheme that achieves computational progress-freedom (Definition 2) equivalent to the information-theoretic progress-freedom of traditional hash-based PoW, while simultaneously producing useful computation. The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
 
 ---
 
@@ -668,7 +686,7 @@ The miner cannot increase the number of PoW tickets by selecting a different tra
 
 ### B.3 Distribution Invariance
 
-Under PRP, for any distinct inputs $x_1, \ldots, x_P$ to the permutation, the outputs are jointly pseudorandom. Input distinctness holds with overwhelming probability (Theorem 1, step (a)).
+Under PRP, for any distinct inputs $x_1, \ldots, x_P$ to the permutation, the outputs are jointly pseudorandom. Input distinctness holds with overwhelming probability (Assumption 1, §2.2).
 
 Each permutation produces three PoW tickets. Under PRP, the success event for each permutation (at least one ticket below target $T$) is a Bernoulli trial with parameter:
 
@@ -710,11 +728,13 @@ In Width-24 compression, the Merkle parent output $S[0..7]$ becomes an input to 
 
 The three PoW tickets $\text{ticket}_0 = S[0..7]$, $\text{ticket}_1 = S[8..15]$, and $\text{ticket}_2 = S[16..23]$ are outputs of the same Poseidon2 permutation and therefore deterministically linked. We show that under PRP, this linkage carries no exploitable statistical correlation.
 
-**Proposition.** *Under the PRP assumption on Poseidon2, $\text{ticket}_0$, $\text{ticket}_1$, and $\text{ticket}_2$ are mutually independent.*
+**Proposition.** *Under the PRP assumption on Poseidon2, the joint distribution of $\text{ticket}_0$, $\text{ticket}_1$, and $\text{ticket}_2$ is computationally indistinguishable from three mutually independent uniform samples over $\mathbb{F}_p^8$.*
 
 *Proof.* Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be a PRP. For any fixed input $x \in \mathbb{F}_p^{24}$, the output $\pi(x)$ is computationally indistinguishable from a uniform sample over $\mathbb{F}_p^{24}$.
 
-Partition $\mathbb{F}_p^{24} = \mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$ as $(A, B, C)$ where $A = S[0..7]$, $B = S[8..15]$, $C = S[16..23]$. If $(A, B, C)$ is uniform over $\mathbb{F}_p^{24}$, then $A$, $B$, $C$ are mutually independent, each uniform over $\mathbb{F}_p^8$. This is a standard property of product probability spaces: the uniform distribution on a product space implies independence of coordinate projections.
+**Ideal world.** Partition $\mathbb{F}_p^{24} = \mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$ as $(A, B, C)$ where $A = S[0..7]$, $B = S[8..15]$, $C = S[16..23]$. If $(A, B, C)$ is uniform over $\mathbb{F}_p^{24}$, then $A$, $B$, $C$ are mutually independent, each uniform over $\mathbb{F}_p^8$ (standard property of product probability spaces).
+
+**Indistinguishability.** Any PPT test detecting inter-ticket correlation can be composed with the PRP output to yield a PRP distinguisher, contradicting the assumption.
 
 Therefore:
 
