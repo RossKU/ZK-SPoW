@@ -30,7 +30,7 @@ A PoW scheme is *progress-free* (or *memoryless*) if the probability of finding 
 
 1. **Fairness.** Progress-based mining gives miners with more accumulated work a higher instantaneous success probability, undermining proportional-hashrate fairness.
 2. **Poisson block arrival.** Independent Bernoulli trials yield a Poisson block arrival process—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
-3. **Difficulty adjustment.** Memoryless trials give expected block time $1/(N \cdot H \cdot q)$. Progress introduces state-dependent variance that breaks difficulty estimation.
+3. **Difficulty adjustment.** Memoryless trials give expected block time $1/(N \cdot H_{rate} \cdot q)$. Progress introduces state-dependent variance that breaks difficulty estimation.
 
 SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each hash evaluation is independent. The challenge: useful computation (STARK proving, optimization) is inherently stateful and progressive.
 
@@ -56,7 +56,7 @@ The mechanism: STARK proof generation requires millions of Merkle hashes. Each W
 
 $$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 
-- **Continuous proving**: Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. Multiple proofs do not reduce $U$; ZK work remains useful regardless of PoW outcome.
+- **Continuous proving**: Every Poseidon2 permutation advances a ZK proof → $U = 100\%$. ZK work remains useful regardless of PoW outcome.
 - **With idle gaps**: Pure PoW fallback trials (no pending ZK work) are wasted → $U$ decreases proportionally.
 
 The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
@@ -87,7 +87,7 @@ This resolves the fundamental tension between useful computation and memoryless 
 
 3. **Width-24 Poseidon2 parameterization.** We specify Width-24 Poseidon2 over M31 in compression function mode (1 permutation per Merkle hash, vs 2 in sponge mode) and verify its security parameters: $R_p = 22$ internal rounds for 128-bit security with $d = 5$ (§6.2).
 
-4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with zero-cycle switching overhead, and provide ASIC architecture analysis for a 7 nm implementation (§5, Appendix A).
+4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with projected zero-cycle switching overhead, and provide ASIC architecture estimates for a 7 nm implementation (§5, Appendix A).
 
 5. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a computational byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle input sources ($99.3\% \pm 0.3\%$, 10 runs, alternating order; Appendix C.2).
 
@@ -103,7 +103,7 @@ This section formalizes the core theoretical contribution: how ZK-SPoW extracts 
 
 $$P(\tau_{n+1} \text{ succeeds} \mid o_1, \ldots, o_n) = P(\tau_{n+1} \text{ succeeds}) = q$$
 
-where $q$ is a fixed parameter determined by the difficulty target $T$. Equivalently, the success events form an i.i.d. Bernoulli($q$) sequence. Progress-free trials at rate $R = N \cdot H$ yield Poisson block arrivals with rate $\lambda = Rq$—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
+where $q$ is a fixed parameter determined by the difficulty target $T$. Equivalently, the success events form an i.i.d. Bernoulli($q$) sequence. Progress-free trials at rate $R = N \cdot H_{rate}$ yield Poisson block arrivals with rate $\lambda = Rq$—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
 
 SHA-256 and kHeavyHash achieve Definition 1 information-theoretically under the random oracle model. For computational primitives like Poseidon2, the random oracle model does not apply. We introduce a computational relaxation:
 
@@ -213,7 +213,7 @@ ZK-SPoW operates at the finest possible granularity—individual permutations (n
 | $r$ | Rate: number of input/output elements (sponge mode) |
 | $c$ | Capacity: security parameter (sponge mode; hidden elements) |
 | $n$ | Hash output size in field elements ($n = 8$, giving 248 bits) |
-| $H$ | Block header (all consensus fields; see §4.4) |
+| $H$ | Block header (all consensus fields; see §4.4). Not to be confused with per-miner trial rate $H_{rate}$ |
 | $h_H$ | Header digest: $\text{PoseidonSponge}(H \text{ excluding nonce}) \in \mathbb{F}_p^k$ |
 | $k$ | Header digest element count ($k = 8$ for symmetric I/O and three PoW tickets) |
 | $(v_1, v_2)$ | Nonce: $v_1, v_2 \in \mathbb{F}_p^8$ |
@@ -221,7 +221,7 @@ ZK-SPoW operates at the finest possible granularity—individual permutations (n
 | $p_t$ | Single-ticket success probability: $p_t = T/2^{248}$ |
 | $q$ | Per-permutation success probability: $q = 1 - (1-p_t)^3$ |
 | $S$ | Poseidon2 state after permutation, $S \in \mathbb{F}_p^t$ |
-| $N$ | Number of miners in the network |
+| $N$ | Number of miners in the network. Distinguished from $N_i$ (Merkle tree leaf count) by subscript |
 | $N_i$ | Number of leaves in Merkle commitment phase $i$ |
 | $m$ | Number of FRI folding rounds |
 | $P$ | Total Poseidon2 permutations across all STARK phases: $P = \sum_{i=0}^{m}(N_i - 1)$ |
@@ -382,7 +382,7 @@ Header {
 }
 ```
 
-The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block, ~0.04% of 125 KB).
+The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block). At 100 BPS this adds 5.6 KB/s to network bandwidth—negligible relative to the ~12.5 MB/s baseline (125 KB/block × 100 BPS).
 
 **Block hash vs PoW hash.** Block identity and PoW use separate hash functions. The block hash (e.g., Blake2b-256 for DAG references) is unchanged; only the PoW function is replaced.
 
@@ -632,9 +632,15 @@ See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW sc
 
 ## 9. Open Questions
 
-1. **$R_p$ for Width-24 (resolved; pending independent verification).** $R_p = 22$ computed via Plonky3's formula [10]; independent cryptanalytic verification pending (§6.2).
+1. **$R_p$ for Width-24: independent verification needed.** $R_p = 22$ is computed via Plonky3's round number formula [10], which applies bounds from [2, 3, 15] with margins $R_f += 2$, $R_p \times 1.075$. The specific computation for Width-24, M31, $d = 5$ has not been independently verified by a dedicated cryptanalysis. Until such verification is performed, the 128-bit security claim for the 30-round configuration should be considered provisional (§6.2).
 
 2. **Memoryless validation.** Empirical verification of Poisson block inter-arrival times in a test network running ZK-SPoW would complement the theoretical analysis of §2.
+
+3. **Output quality under production constants.** The GPU experiments (Appendix C) use placeholder round constants. Statistical testing of output pseudorandomness (e.g., NIST SP 800-22) under production Poseidon2 constants would validate that the PRP assumption holds in practice, not only in theory.
+
+4. **Equilibrium analysis.** The Pareto analysis (§7) is a static comparison. A dynamic equilibrium analysis—ZK-SPoW ASICs vs Pure PoW ASICs under varying ZK demand, including the 10–20% hash/watt disadvantage when ZK demand is insufficient—would strengthen the economic argument. Related: the source and stability of ZK proof demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
+
+5. **Selfish mining interaction.** The interaction between Symbiotic mode and selfish mining (or block withholding) in DAG-based consensus has not been analyzed. A miner who discovers a PoW ticket mid-phase faces strategic choices (submit immediately vs. withhold) that may interact with STARK proof progress.
 
 **Resolved.** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) are resolved under the PRP assumption.
 
@@ -778,7 +784,9 @@ The quantity $q = 1 - (1-p_t)^3$ used in §6.5 and Appendix B.2–B.5 is exact u
 
 ## Appendix C: GPU Validation
 
-GPUs can freely allocate compute between ZK and PoW in software—the ZK:PoW ratio is a scheduling parameter. The ASIC-specific claim of simultaneous pipeline execution (§5.6) cannot be validated on GPU. What GPU validates: (1) STARK computation produces PoW tickets as a byproduct, and (2) no measurable throughput difference between input sources.
+**Scope and limitations.** GPUs can freely allocate compute between ZK and PoW in software—the ZK:PoW ratio is a scheduling parameter. The ASIC-specific claim of simultaneous pipeline execution (§5.6) cannot be validated on GPU. What GPU validates: (1) STARK computation produces PoW tickets as a byproduct, and (2) no measurable throughput difference between input sources.
+
+**Placeholder round constants.** All GPU experiments use the current Stwo implementation, which sets `EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly to `1234` (placeholder values). This does not affect throughput measurements—Poseidon2's computational cost (field multiplications, additions, MDS matrix application) is identical regardless of round constant values. However, output quality (pseudorandomness, collision resistance) under placeholder constants may differ from production parameters. The throughput results in §C.1 and §C.2 are valid; they should not be interpreted as security validation of the Poseidon2 instantiation.
 
 We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA—iCFFT/CFFT, Merkle tree commitment, constraint quotient, Fiat-Shamir, and FRI fold—as a single `stark.cu` file (~1600 lines). All Poseidon2 parameters match the paper specification: W=24, Rf=8, Rp=22, M31, compression function mode.
 
