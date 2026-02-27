@@ -85,7 +85,7 @@ This resolves the fundamental tension between useful computation and memoryless 
 
 4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with zero-cycle switching overhead, and provide gate-level ASIC architecture analysis for a 7 nm implementation (§5, Appendix A).
 
-5. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a computational byproduct (Appendix B.1); (b) no meaningful throughput difference between random nonce and structured Merkle input sources ($99.3\% \pm 0.3\%$, 10 runs, alternating order; Appendix B.2).
+5. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a computational byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle input sources ($99.3\% \pm 0.3\%$, 10 runs, alternating order; Appendix C.2).
 
 **Generality.** The ZK-SPoW construction is hardware-agnostic and not specific to Kaspa. Any PoW blockchain adopting Poseidon2-based STARKs can apply the same approach. We present Kaspa as the concrete instantiation: its planned Stwo integration, existing ASIC mining ecosystem, and 100 BPS throughput make it a compelling first target.
 
@@ -405,7 +405,7 @@ pow_ticket2   = S[16..23]   <- checked against PoW target
 if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 ```
 
-$U = t_0/t = 16/24 \approx 67\%$. GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix B.1).
+$U = t_0/t = 16/24 \approx 67\%$. GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix C.1).
 
 **Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; each phase completes within one block interval (<10 ms at ~2G hash/sec). Between phases, the header digest updates to the current block. Maximum staleness is 1 block—see Theorem 2 (§2.3) for formal bound and DAGKnight tolerance analysis.
 
@@ -444,7 +444,7 @@ The transition is **per-cycle and linear**, not a discrete mode switch. The pipe
 
 *Argument.* $\mathcal{H} = N_{cores} \times \text{throughput\_per\_core}$. Each core's throughput is 1 hash per pipeline depth cycles (fully pipelined), regardless of input source. Input MUX adds zero latency (combinational logic). Therefore $\mathcal{H}$ is constant across all modes.
 
-**GPU validation.** No meaningful throughput difference was observed: mean ratio $99.3\% \pm 0.3\%$ across 10 runs with alternating execution order (95% CI: [99.1%, 99.5%]; Appendix B.2). The 0.7% gap is attributable to GPU global memory I/O overhead, not input-dependent computation.
+**GPU validation.** No meaningful throughput difference was observed: mean ratio $99.3\% \pm 0.3\%$ across 10 runs with alternating execution order (95% CI: [99.1%, 99.5%]; Appendix C.2). The 0.7% gap is attributable to GPU global memory I/O overhead, not input-dependent computation.
 
 ### 5.5 Difficulty Independence
 
@@ -501,7 +501,7 @@ Poseidon2 [3] provides 128-bit security in sponge mode with capacity $c = 8$ M31
 
 ### 6.3 Trace Grinding Resistance
 
-We prove that trace selection in Symbiotic mode provides zero advantage for PoW mining under the PRP assumption.
+We prove that trace selection in Symbiotic mode provides zero advantage for PoW mining under the PRP assumption. Full proofs in Appendix B.
 
 **Assumptions.** (1) PRP: Poseidon2 $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ is a pseudorandom permutation. (2) Fixed tree sizes: Each Merkle phase $i$ has $N_i$ leaves, yielding $N_i - 1$ evaluations, independent of trace content. (3) Fixed header digest per phase.
 
@@ -517,7 +517,7 @@ We prove that trace selection in Symbiotic mode provides zero advantage for PoW 
 
 ### 6.4 Triple-Ticket Independence
 
-The three PoW tickets $\text{ticket}_0 = S[0..7]$, $\text{ticket}_1 = S[8..15]$, $\text{ticket}_2 = S[16..23]$ are outputs of the same permutation and therefore deterministically linked.
+The three PoW tickets $\text{ticket}_0 = S[0..7]$, $\text{ticket}_1 = S[8..15]$, $\text{ticket}_2 = S[16..23]$ are outputs of the same permutation and therefore deterministically linked. Full proof in Appendix B.7.
 
 **Proposition 3.** *Under the PRP assumption on Poseidon2, $\text{ticket}_0$, $\text{ticket}_1$, and $\text{ticket}_2$ are mutually independent.*
 
@@ -649,7 +649,7 @@ ZK-SPoW is the only ZK-based PoW scheme that achieves the same progress-free pro
 
 6. **ZK market maturity.** Economic advantage depends on ZK proof demand. Timeline uncertain.
 
-7. **Complementary bottleneck validation (partially resolved).** GPU validates: no throughput difference between input sources ($99.3\% \pm 0.3\%$, Appendix B.2), and byproduct ticket generation up to 136.39M tickets/s (Appendix B.1). ASIC-specific simultaneous execution claim requires ASIC implementation for full validation.
+7. **Complementary bottleneck validation (partially resolved).** GPU validates: no throughput difference between input sources ($99.3\% \pm 0.3\%$, Appendix C.2), and byproduct ticket generation up to 136.39M tickets/s (Appendix C.1). ASIC-specific simultaneous execution claim requires ASIC implementation for full validation.
 
 8. **(Resolved.)** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) resolved under PRP.
 
@@ -798,7 +798,91 @@ Poseidon2 has ~6× lower PoW hashrate per die. **This is absorbed by difficulty 
 
 ---
 
-## Appendix B: GPU Validation
+## Appendix B: Trace Grinding and Triple-Ticket Proofs
+
+The following provides complete formal proofs for the claims in §6.3–6.4.
+
+### B.1 Assumptions
+
+1. **PRP.** The Poseidon2 permutation $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ is a pseudorandom permutation. For any input $x$, the output $\pi(x)$ is indistinguishable from uniform over $\mathbb{F}_p^{24}$.
+2. **Fixed tree sizes.** Each Merkle commitment phase $i$ ($i = 0$ for the initial trace commitment, $i = 1, \ldots, m$ for FRI rounds) has $N_i$ leaves, yielding $N_i - 1$ internal hash evaluations, where $N_i$ is determined by the protocol (trace length, blowup factor, FRI folding rate). The values $N_i$ are independent of trace content.
+3. **Fixed header digest.** The header digest $h_H \in \mathbb{F}_p^8$ is fixed at the start of each Merkle commitment phase and constant throughout that phase.
+
+### B.2 Ticket Count Invariance
+
+Each Poseidon2 permutation in the Merkle tree produces three PoW tickets. The total number of permutations across all STARK phases is:
+
+$$P = \sum_{i=0}^{m} (N_i - 1)$$
+
+Since each $N_i$ is a protocol parameter independent of the trace $t$:
+
+$$\forall\, t_1, t_2: \quad P(t_1) = P(t_2) = P$$
+
+The miner cannot increase the number of PoW tickets by selecting a different trace.
+
+### B.3 Distribution Invariance
+
+Under PRP, for any distinct inputs $x_1, \ldots, x_P$ to the permutation, the outputs $\pi(x_1), \ldots, \pi(x_P)$ are jointly pseudorandom. In a Merkle tree, all permutation inputs are distinct with overwhelming probability: two nodes sharing the same input $(n_L, n_R, h_H)$ requires a collision in the 248-bit child outputs, which occurs with probability at most $\binom{P}{2} \cdot 2^{-248}$—negligible for $P \leq 10^7$.
+
+Each permutation produces three PoW tickets. Under PRP, the success event for each permutation (at least one ticket below target $T$) is a Bernoulli trial with parameter:
+
+$$q = 1 - (1-p)^3 \approx 3p, \quad p = T / 2^{248}$$
+
+This parameter depends only on the target $T$, not on the permutation input. Since inter-permutation independence holds (distinct inputs under PRP), the number of successful permutations follows:
+
+$$V \sim \mathrm{Binomial}(P,\, q)$$
+
+Both parameters $(P, q)$ are trace-independent. Therefore, not only the expectation $E[V] = Pq$ but the *entire distribution* of valid tickets is invariant under trace selection. There is no trace for which the variance is smaller (guaranteeing a hit) or larger.
+
+**Fiat-Shamir cascade.** Trace selection affects FRI round Merkle trees via the Fiat-Shamir challenge dependency on the initial Merkle root. Changing the trace changes all subsequent challenges, folding points, and FRI Merkle trees. However, each FRI tree size $N_i$ is protocol-determined, and PRP ensures each resulting ticket has identical success probability. The argument above extends to all commitment phases.
+
+### B.4 Header Digest Grinding
+
+The miner can produce different header digests $h_H$ by choosing different parent blocks or transaction sets. With the same trace but a new $h_H$, the entire Merkle tree must be rebuilt (cost: $P$ permutations), producing $P$ new permutation triples. Under PRP, this is functionally equivalent to $P$ pure PoW nonce hashes—identical cost, identical ticket distribution. Moreover, only one $h_H$ can be used for the STARK proof; the remaining attempts produce PoW tickets but discard the STARK computation. Header digest grinding offers no advantage beyond standard nonce grinding.
+
+### B.5 Multi-Trial Grinding
+
+A miner who computes $k$ distinct traces and selects the one with the most valid PoW tickets:
+
+**Cost:** $k \times (C_{\mathrm{NTT}} + C_{\mathrm{trace}} + P)$ permutations, where $C_{\mathrm{NTT}}$ and $C_{\mathrm{trace}}$ are the NTT and trace generation costs (counted conservatively as zero in the comparison below).
+
+**Benefit:** $\max(V_1, \ldots, V_k)$ where each $V_i \sim \mathrm{Binomial}(P, q)$ independently.
+
+For the same $k \times P$ Poseidon2 permutations in pure PoW mode, all tickets are valid (none discarded), yielding $V_{\mathrm{PoW}} \sim \mathrm{Binomial}(kP, q)$.
+
+By linearity, $E[V_{\mathrm{PoW}}] = kPq$. The best-of-$k$ selection gives $E[\max(V_1, \ldots, V_k)] \leq Pq + O(\sqrt{\log k \cdot Pq(1-q)})$. For any $k \geq 2$:
+
+$$E[\max(V_1, \ldots, V_k)] < kPq = E[V_{\mathrm{PoW}}]$$
+
+Multi-trial grinding is strictly dominated by pure PoW. Including the NTT and trace generation overhead (omitted above) makes the comparison strictly worse for grinding.
+
+### B.6 Merkle Tree Feedback Structure
+
+In Width-24 compression, the Merkle parent output $S[0..7]$ becomes an input to the next tree level, and $h_H$ occupies $S[16..23]$ at every level. This creates structured, non-i.i.d. inputs to successive permutations. Under PRP, the permutation's output distribution is uniform regardless of input structure. The full 30-round Poseidon2 (8 external + 22 internal) provides complete diffusion across all 24 state elements. Any weakness in PRP for structured inputs would constitute a break of Poseidon2 itself—the same assumption underlying the PoW security analysis (§6.2). ∎
+
+### B.7 Triple-Ticket Independence
+
+The three PoW tickets $\text{ticket}_0 = S[0..7]$, $\text{ticket}_1 = S[8..15]$, and $\text{ticket}_2 = S[16..23]$ are outputs of the same Poseidon2 permutation and therefore deterministically linked. We show that under PRP, this linkage carries no exploitable statistical correlation.
+
+**Proposition.** *Under the PRP assumption on Poseidon2, $\text{ticket}_0$, $\text{ticket}_1$, and $\text{ticket}_2$ are mutually independent.*
+
+*Proof.* Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be a PRP. For any fixed input $x \in \mathbb{F}_p^{24}$, the output $\pi(x)$ is computationally indistinguishable from a uniform sample over $\mathbb{F}_p^{24}$.
+
+Partition $\mathbb{F}_p^{24} = \mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$ as $(A, B, C)$ where $A = S[0..7]$, $B = S[8..15]$, $C = S[16..23]$. If $(A, B, C)$ is uniform over $\mathbb{F}_p^{24}$, then $A$, $B$, $C$ are mutually independent, each uniform over $\mathbb{F}_p^8$. This is a standard property of product probability spaces: the uniform distribution on a product space implies independence of coordinate projections.
+
+Therefore:
+
+$$P(A < T) = p = T/2^{248}$$
+$$P(B < T) = p$$
+$$P(C < T) = p$$
+$$P(A < T \wedge B < T \wedge C < T) = p^3$$
+$$P(A < T \vee B < T \vee C < T) = 1 - (1-p)^3 = 3p - 3p^2 + p^3$$
+
+The quantity $q = 1 - (1-p)^3$ used in §6.5 and Appendix B.2–B.5 is exact under PRP, not an approximation. ∎
+
+---
+
+## Appendix C: GPU Validation
 
 GPUs can freely allocate compute between ZK and PoW in software—the ZK:PoW ratio is a scheduling parameter. The ASIC-specific claim of simultaneous pipeline execution (§5.6) cannot be validated on GPU. What GPU validates: (1) STARK computation produces PoW tickets as a byproduct, and (2) no measurable throughput difference between input sources.
 
@@ -806,7 +890,7 @@ We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA—iCFFT/C
 
 **Test environment:** NVIDIA GeForce RTX 4070 (46 SMs, 5483 CUDA cores, 1920 MHz base / 2475 MHz boost, 12 GB GDDR6X, 504 GB/s).
 
-### B.1 PoW Tickets as a Byproduct of ZK
+### C.1 PoW Tickets as a Byproduct of ZK
 
 **Claim (§5.1).** Every Poseidon2 Merkle hash in the STARK simultaneously advances the ZK proof and produces 3 PoW tickets. A standard Width-16 prover produces 0 tickets.
 
@@ -825,7 +909,7 @@ We implement a complete Width-24 Poseidon2 Circle STARK prover in CUDA—iCFFT/C
 
 Peak throughput: 136.39M PoW tickets/s at $k = 20$. At $k = 22$, STARK overhead (NTT, constraint evaluation) dominates.
 
-### B.2 Input Independence
+### C.2 Input Independence
 
 **Claim (§5.3).** No meaningful throughput difference between random nonce input (Pure PoW) and structured Merkle input (Symbiotic mode).
 
