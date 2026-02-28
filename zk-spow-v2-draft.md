@@ -29,7 +29,7 @@ Traditional PoW schemes produce no output beyond network security. The entire en
 A PoW scheme is *progress-free* (or *memoryless*) if the probability of finding a valid block on any trial is independent of all previous trials. This property is fundamental:
 
 1. **Fairness.** Progress-based mining gives miners with more accumulated work a higher instantaneous success probability, undermining proportional-hashrate fairness.
-2. **Poisson block arrival.** Independent Bernoulli trials yield a Poisson block arrival process—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
+2. **Poisson block arrival.** Independent Bernoulli trials yield a Poisson block arrival process—a prerequisite for Nakamoto consensus security proofs.
 3. **Difficulty adjustment.** Memoryless trials give expected block time $1/(N \cdot H_{rate} \cdot q)$. Progress introduces state-dependent variance that breaks difficulty estimation.
 
 SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each hash evaluation is independent. The challenge: useful computation (STARK proving, optimization) is inherently stateful and progressive.
@@ -83,21 +83,17 @@ However, ZK-SPoW does not use proof completion as the PoW event. Instead, **each
 - The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
 - Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
 
-**Result:** ZK-SPoW is computationally progress-free (§2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption, preserving the security assumptions of Nakamoto-style and DAG-based consensus.
+**Result:** ZK-SPoW is computationally progress-free (§2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption—satisfying the prerequisite that Nakamoto consensus security proofs require [5].
 
 This addresses the challenge of combining useful computation with memoryless PoW—not by making the computation memoryless, but by extracting PoW at a granularity where the PRP assumption guarantees independence.
 
 ### 1.5 Contributions
 
-1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations, prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 via a real–ideal reduction (Theorem 1), and bound header staleness to one Merkle commitment phase (§2).
+1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem 1, §2). Header staleness is bounded to one Merkle commitment phase (~3 ms GPU, 0.05 ms ASIC).
 
-2. **Dual-purpose permutation output.** Each Poseidon2 evaluation in STARK Merkle hashing simultaneously produces a Merkle parent (ZK) and PoW tickets—a mathematical byproduct requiring no protocol enforcement. The operating mode is distinguishable via nonce format and mempool proof correlation, though not enforced at consensus (§1.3, §4.4, §8.3).
+2. **Width-24 Poseidon2 in compression function mode.** We specify Width-24 Poseidon2 over M31 (1 permutation per Merkle hash, vs 2 in sponge mode) with $R_p = 22$ internal rounds for 128-bit security (§6.2). The 24-element output naturally partitions into a Merkle parent (advancing the ZK proof) and two additional PoW tickets—the dual-purpose output that makes ZK-SPoW possible (§4.2–§4.3).
 
-3. **Width-24 Poseidon2 parameterization.** We specify Width-24 Poseidon2 over M31 in compression function mode (1 permutation per Merkle hash, vs 2 in sponge mode) and verify its security parameters: $R_p = 22$ internal rounds for 128-bit security with $d = 5$ (§6.2).
-
-4. **Complementary bottleneck architecture.** We demonstrate that PoW mining (compute-bound) and STARK proof generation (memory-bound) share Poseidon2 hardware with projected zero-cycle switching overhead, and provide ASIC architecture estimates for a 7 nm implementation (§5, Appendix A).
-
-5. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a computational byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle input sources ($99.3\% \pm 0.3\%$, 10 runs, alternating order; Appendix C.2).
+3. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle inputs ($99.3\% \pm 0.3\%$; Appendix C.2).
 
 ---
 
@@ -107,7 +103,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 A PoW scheme is *progress-free* if each trial's success probability is independent of all prior outcomes—i.e., the success events form an i.i.d. Bernoulli($q$) sequence, yielding Poisson block arrivals [Garay et al., 2015]. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
 
-Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto-style and DAG-based consensus security, since these proofs operate in a computational model [5].
+Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security, since these proofs operate in a computational model [5].
 
 **Why proof-level PoW fails.** If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80% completion has observably higher conditional success probability than one at 10%.
 
@@ -647,7 +643,7 @@ ZK-SPoW operates at the finest possible granularity—individual permutations (n
 
 ## 10. Conclusion
 
-ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), preserving the progress-freedom required by Nakamoto-style and DAG-based consensus. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with zero throughput switching overhead between modes.
+ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with zero throughput switching overhead between modes.
 
 The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.5), and depends entirely on external ZK proof demand (§7.2). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
 
