@@ -717,6 +717,16 @@ See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW sc
 
 ---
 
+## 10. Conclusion
+
+ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), preserving the progress-freedom required by Nakamoto-style and DAG-based consensus. The architecture is hardware-symbiotic: PoW mining and STARK proving share the same permutation on the same silicon, with zero throughput switching overhead between modes.
+
+The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}50\%$) is constrained by SRAM bandwidth and STARK pipeline phase ratios (§5.5), and depends entirely on external ZK proof demand (§7.2). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
+
+Despite these limitations, ZK-SPoW demonstrates that useful computation and memoryless PoW are not inherently incompatible at the hardware level—the tension identified in prior PoUW work can be sidestepped by operating at the permutation granularity rather than the proof granularity.
+
+---
+
 ## Appendix A: ASIC Architecture Estimates
 
 *All parameters are reference estimates for a hypothetical 7 nm design. No chip has been fabricated.*
