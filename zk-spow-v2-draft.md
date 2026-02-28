@@ -81,7 +81,7 @@ However, ZK-SPoW does not use proof completion as the PoW event. Instead, **each
 - The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
 - Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
 
-**Result:** ZK-SPoW is computationally progress-free (Definition 2, §2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption, preserving the security assumptions of Nakamoto-style and DAG-based consensus.
+**Result:** ZK-SPoW is computationally progress-free (§2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption, preserving the security assumptions of Nakamoto-style and DAG-based consensus.
 
 This addresses the challenge of combining useful computation with memoryless PoW—not by making the computation memoryless, but by extracting PoW at a granularity where the PRP assumption guarantees independence.
 
@@ -99,139 +99,45 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 ---
 
-## 2. Memoryless PoW from Non-Memoryless Computation
+## 2. Progress-Freedom and Header Staleness
 
-This section formalizes the core theoretical contribution: how ZK-SPoW extracts progress-free PoW from the inherently stateful STARK proving process.
+### 2.1 Computational Progress-Freedom
 
-### 2.1 Progress-Free Property
+A PoW scheme is *progress-free* if each trial's success probability is independent of all prior outcomes—i.e., the success events form an i.i.d. Bernoulli($q$) sequence, yielding Poisson block arrivals [Garay et al., 2015]. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
 
-**Definition 1 (Progress-Free PoW).** A PoW scheme with trial sequence $\tau_1, \tau_2, \ldots$ is *progress-free* if for all $n \geq 1$ and all outcomes $o_1, \ldots, o_n$ of the first $n$ trials:
+Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto-style and DAG-based consensus security, since these proofs operate in a computational model [5].
 
-$$P(\tau_{n+1} \text{ succeeds} \mid o_1, \ldots, o_n) = P(\tau_{n+1} \text{ succeeds}) = q$$
-
-where $q$ is a fixed parameter determined by the difficulty target $T$. Equivalently, the success events form an i.i.d. Bernoulli($q$) sequence. Progress-free trials at rate $R = N \cdot H_{rate}$ yield Poisson block arrivals with rate $\lambda = Rq$—a prerequisite for Nakamoto-style and DAG-based consensus security proofs.
-
-SHA-256 and kHeavyHash achieve Definition 1 information-theoretically under the random oracle model. For computational primitives like Poseidon2, the random oracle model does not apply. We introduce a computational relaxation:
-
-**Definition 2 (Computationally Progress-Free PoW).** A PoW scheme is *computationally progress-free* with security parameter $\kappa$ if no probabilistic polynomial-time (PPT) adversary can distinguish the joint distribution of trial outcomes $(o_1, \ldots, o_n)$ from an i.i.d. Bernoulli($q$) sequence with non-negligible advantage in $\kappa$.
-
-STARK proof generation is not even computationally progress-free at the proof level: it is stateful (trace → NTT → Merkle → Fiat-Shamir → FRI), and if proof completion is the PoW event, a miner at 80% completion has higher conditional success probability than one at 10%—a distinction any observer can make without breaking any cryptographic assumption.
+**Why proof-level PoW fails.** If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80% completion has observably higher conditional success probability than one at 10%.
 
 ### 2.2 Permutation-Level Independence
 
-ZK-SPoW resolves this by defining the PoW trial at the individual permutation level, not the proof level.
+ZK-SPoW defines the PoW trial at the individual Poseidon2 permutation, not the proof. Each evaluation $\pi(x_j)$ on a Merkle node input produces three PoW tickets from the 24-element output (§4.3). The core argument is straightforward:
 
-**Setup.** Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be the Width-24 Poseidon2 permutation. In a STARK Merkle tree commitment phase, the prover evaluates $\pi$ on inputs $x_1, \ldots, x_P$ where:
-- $x_j = (n_{L,j} \| n_{R,j} \| h_H)$ for Merkle node $j$
-- $n_{L,j}, n_{R,j} \in \mathbb{F}_p^8$ are the left and right child hashes
-- $h_H \in \mathbb{F}_p^8$ is the (fixed) header digest
-- $P = \sum_{i=0}^{m}(N_i - 1)$ is the total number of internal Merkle nodes across all commitment phases
+**Theorem 1 (Computational Progress-Freedom).** *Under the PRP assumption on Width-24 Poseidon2, the PoW success events $E_1, \ldots, E_P$ across all Merkle tree evaluations are computationally indistinguishable from i.i.d. Bernoulli($q$), with $q = 1 - (1-T/p^8)^3$.*
 
-Each evaluation produces three PoW tickets: $\text{ticket}_{j,k} = \pi(x_j)[8k:8k+7]$ for $k \in \{0, 1, 2\}$.
+*Proof sketch.* Merkle tree inputs are pairwise distinct except with negligible probability ($< 10^{-60}$ for $P \leq 10^7$, by union bound on PRP output collisions). For distinct inputs, the PRP assumption guarantees that $(\pi(x_1), \ldots, \pi(x_P))$ is computationally indistinguishable from independent uniform outputs. Each ticket comparison $\text{ticket} < T$ is a deterministic function of the output, so the derived events inherit independence. The PRP–PRF switching cost is $P^2/(2p^{24}) < 10^{-210}$, negligible. ∎
 
-**Lemma 1 (Input Distinctness under PRP).** *Under the PRP assumption, the inputs $x_1, \ldots, x_P$ to the Merkle tree permutations are pairwise distinct except with negligible probability.*
+The full proof (real–ideal reduction) and details on input distinctness, structured inputs, side information, and malicious input injection are in Appendix D.
 
-*Proof.* In Circle STARK, Merkle tree leaves are evaluations of trace polynomials at $2^\ell$ distinct domain points; leaf-level inputs are therefore distinct by construction. At level $\ell > 0$, a collision requires $\pi(x_j)[0:7] = \pi(x_{j'})[0:7]$ for distinct $x_j, x_{j'}$. Under PRP, each output projection is pseudorandom, so this occurs with probability at most $p^{-8}$ per pair. By a union bound over all $\binom{P}{2}$ pairs:
+**Remark (Malicious inputs).** A miner who feeds repeated or arbitrary inputs to Poseidon2 receives the same deterministic output for each repeated input—strictly reducing their ticket count. Input distinctness is a rational behavior property, not a protocol requirement.
 
-$$\Pr[\text{any collision}] \leq \binom{P}{2} \cdot p^{-8} < \frac{P^2}{2 p^8}$$
+### 2.3 Header Staleness
 
-For $P \leq 10^7$: $P^2/(2p^8) < 10^{14} / (2 \cdot (2^{31}-1)^8) \approx 10^{14} / 10^{74} = 10^{-60}$, negligible. We define the "good event" $G$ as the event that all inputs are distinct, and condition subsequent analysis on $G$. The "bad event" $\bar{G}$ contributes at most $\Pr[\bar{G}] \leq \mathrm{negl}(\kappa)$ to any distinguishing advantage. ∎
+In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment phase. Traditional PoW has zero staleness (each hash references the latest header); ZK-SPoW introduces staleness $\Delta_{stale} \leq N_{max}/R_{perm}$, where $N_{max}$ is the largest Merkle tree size.
 
-**Remark (Malicious input injection).** Since the protocol does not verify STARK internals (§4.4), a miner could feed arbitrary—including intentionally colliding—inputs to the Poseidon2 permutation instead of genuine Merkle data. This does not undermine PoW security: (1) **PRP holds for all inputs.** Under PRP, $\pi(x)$ is pseudorandom for *any* $x$, including adversarially chosen ones. (2) **Repeated inputs are strictly self-harming.** A miner who feeds the same input $x$ twice receives the same deterministic output $\pi(x)$ both times—no new PoW ticket is generated. More generally, a miner who uses $k$ colliding inputs among $P$ total evaluations produces only $P - k$ distinct outputs, strictly reducing their PoW ticket count. (3) **No network-level consequence.** The violation affects only the miner's own ticket count and is undetectable by other nodes. Input distinctness (Lemma 1) is therefore a *rational behavior property*, not a protocol enforcement requirement: any violation is strictly self-penalizing.
+**Concrete bounds:** GPU (measured): $\Delta_{stale} \approx 3.4$ ms at $\ell = 20$, 305 Mperm/s. ASIC (projected): $\Delta_{stale} \approx 0.05$ ms at 21 Gperm/s.
 
-**Theorem 1 (Permutation-Level Independence).** *Under the PRP assumption on Poseidon2 with security parameter $\kappa$, conditioning on the good event $G$ of Lemma 1, the joint distribution of PoW success events*
+**Impact on BlockDAG consensus.** At 100 BPS, global propagation delays (50–200 ms) produce baseline anticone sizes of 10–40 blocks. In a BlockDAG [5], parallel blocks are all included—larger anticones do not compromise security, but increase confirmation time proportionally. Simulation ($10 \times 60$ s runs, Poisson arrivals, log-normal delays; source: `analysis/dagknight_staleness_sim.py`) shows GPU staleness adds a constant +0.68 blocks to the anticone—a **1.7–6.8% marginal increase** on global networks, with a proportional confirmation time cost. ASIC staleness (+0.01 blocks) is unmeasurable.
 
-$$E_j = \{\exists\, k \in \{0,1,2\} : \text{ticket}_{j,k} < T\}, \quad j = 1, \ldots, P$$
+| Network delay | Baseline anticone | With GPU (3.4 ms) | Marginal increase |
+|---|---|---|---|
+| 5 ms (LAN) | 1.00 | 1.68 | +0.68 (+67%) |
+| 50 ms (global) | 10.05 | 10.73 | +0.68 (+6.8%) |
+| 200 ms (global) | 40.13 | 40.81 | +0.68 (+1.7%) |
 
-*is computationally indistinguishable from an i.i.d. Bernoulli($q$) sequence, with $q = 1 - (1-p_t)^3$, $p_t = T/p^8$. That is, for any PPT distinguisher $\mathcal{D}$:*
+**Selfish mining.** An attacker announcing blocks at phase boundaries can waste victims' partial STARK computation, but gains no PoW advantage—stale tickets remain valid. The cost is at most one phase of ZK throughput (~3.4 ms × $f_{sym}$), not PoW security. Precision timing is impractical over 50–200 ms network jitter.
 
-$$|\Pr[\mathcal{D}(E_1, \ldots, E_P) = 1] - \Pr[\mathcal{D}(B_1, \ldots, B_P) = 1]| \leq \mathrm{negl}(\kappa)$$
-
-*where $B_1, \ldots, B_P \stackrel{i.i.d.}{\sim} \mathrm{Bernoulli}(q)$.*
-
-*Proof.* We proceed via a real–ideal argument.
-
-**Real world.** The prover evaluates $\pi(x_1), \ldots, \pi(x_P)$ on distinct inputs (conditioned on $G$, Lemma 1) and derives events $E_1, \ldots, E_P$.
-
-**Ideal world.** Replace $\pi$ with a truly random function $f: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$. For distinct inputs, the outputs $f(x_1), \ldots, f(x_P)$ are mutually independent and each uniform over $\mathbb{F}_p^{24}$. In this world:
-
-**(a) Intra-permutation independence.** Each $f(x_j)$ is uniform over $\mathbb{F}_p^{24} = \mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$. The three 8-element projections are mutually independent (product probability space), each uniform over $\mathbb{F}_p^8$. The event $\{\text{ticket}_{j,k} < T\}$ has probability $p_t = T/p^8$. Hence $P(E_j) = 1-(1-p_t)^3 = q$.
-
-**(b) Inter-permutation independence.** For distinct inputs, the outputs $f(x_j)$ are independent, so the events $E_j$ are independent.
-
-Thus in the ideal world, $\{E_j\}_{j=1}^P$ are i.i.d. Bernoulli($q$).
-
-**Indistinguishability.** By the PRP assumption, no PPT adversary can distinguish $(\pi(x_1), \ldots, \pi(x_P))$ from $(f(x_1), \ldots, f(x_P))$ for distinct inputs. Since each $E_j$ is a deterministic function of the corresponding output, any PPT distinguisher for the event sequences can be composed with the event-extraction function to yield a PPT distinguisher for the outputs—contradicting the PRP assumption. ∎
-
-**Remark (PRP–PRF switching).** A PRP is a permutation: distinct inputs yield distinct outputs, introducing a negligible anti-correlation absent in a random function. The statistical distance between a random permutation and a random function on $P$ queries is at most $\binom{P}{2}/|\mathbb{F}_p^{24}| \leq P^2/(2 p^{24})$. For $P = 10^7$: $P^2/(2 p^{24}) < 10^{14}/(2 \cdot 10^{223}) \approx 10^{-210}$—negligible by any standard. This is the standard PRP–PRF switching lemma; the proof above absorbs this cost into $\mathrm{negl}(\kappa)$.
-
-**Remark on structured inputs.** Merkle tree feedback (parent outputs become child inputs) and Fiat-Shamir cascades (trace selection affects FRI trees) create structured, non-i.i.d. permutation inputs. This does not violate Theorem 1: the PRP guarantee holds for *any* sequence of distinct inputs, regardless of how they are generated—any weakness for structured inputs would constitute a Poseidon2 break. The total ticket count $P$ is trace-independent (§6.3).
-
-**Corollary 1 (Computational Progress-Freedom).** *Under the PRP assumption, ZK-SPoW is computationally progress-free (Definition 2). Consequently, block discovery is computationally indistinguishable from a Poisson process.*
-
-*Proof.* By Theorem 1, the PoW events are computationally indistinguishable from i.i.d. Bernoulli($q$). Any PPT consensus adversary $\mathcal{A}$ that gains non-negligible advantage (e.g., disproportionate mining share) by exploiting non-Poisson block arrivals must implicitly distinguish the real trial sequence from the ideal i.i.d. sequence. Formally: given $\mathcal{A}$ with advantage $\epsilon(\kappa)$ under real events but advantage $0$ under i.i.d. events, we construct a distinguisher $\mathcal{D}$ with advantage $\geq \epsilon(\kappa)$ by running $\mathcal{A}$ on the challenge sequence—contradicting Theorem 1 if $\epsilon$ is non-negligible.
-
-**Side information.** A miner observes not only PoW outcomes $(E_1, \ldots, E_P)$ but also STARK execution state (e.g., which Merkle tree level is being computed, NTT completion status). This side information does not help predict future PoW outcomes: under PRP, the output of $\pi(x_j)$ is pseudorandom regardless of how $x_j$ was generated or what the miner knows about the computation's progress. Therefore the adversary's enlarged action space (e.g., deciding whether to abandon a phase upon new block arrival) does not invalidate the reduction—any strategy conditioned on STARK progress that yields consensus advantage can still be converted into a PRP distinguisher, since the PoW outcomes it ultimately exploits remain computationally indistinguishable from i.i.d. ∎
-
-**Remark (Sufficiency for consensus security).** Nakamoto-style security proofs [Garay et al., 2015] and DAG-based security proofs [5] rely on block arrival being a Poisson process in two key ways: (1) bounding selfish-mining advantage via the memoryless property of inter-arrival times, and (2) difficulty adjustment convergence via the law of large numbers on i.i.d. trials. Both arguments are stated for PPT adversaries operating within a computational model. Replacing information-theoretic i.i.d. with computational indistinguishability from i.i.d. preserves these bounds: any PPT adversary achieving better-than-Poisson selfish-mining advantage or difficulty manipulation must distinguish the trial sequence from i.i.d., contradicting Theorem 1. The only scenario where computational progress-freedom is strictly weaker than information-theoretic progress-freedom is if the consensus security proof requires a *superpolynomial-time* argument—which no standard proof does.
-
-### 2.3 Header Staleness Bound
-
-In ZK-SPoW, the header digest $h_H$ is fixed for the duration of a Merkle commitment phase. A PoW ticket found at the end of a phase references a header that may be slightly behind the current DAG tip. We bound this staleness.
-
-**Theorem 2 (Header Staleness Bound).** *The maximum header staleness of a ZK-SPoW PoW ticket is 1 Merkle commitment phase, bounded by:*
-
-$$\Delta_{stale} \leq \frac{N_{max}}{R_{perm}}$$
-
-*where $N_{max} = \max_i N_i$ is the largest Merkle tree across all commitment phases, and $R_{perm}$ is the permutation throughput.*
-
-*Proof.* A STARK proof consists of $O(10)$ Merkle commitment phases (initial trace + FRI rounds). Each phase $i$ has $N_i - 1$ internal hash evaluations. The header digest register $h_H$ updates between phases to the current block. Within phase $i$, all permutations use the same $h_H$.
-
-At throughput $R_{perm}$, phase $i$ completes in $t_i = (N_i - 1)/R_{perm}$ seconds. The maximum staleness is the duration of the longest phase. Between phases, $h_H$ is refreshed to the current DAG tip. ∎
-
-**Concrete bounds:**
-- **GPU** (measured): At $\ell = 20$ (trace size $2^{20}$), the largest Merkle tree has $\sim 2^{20}$ permutations. At 305 Mperm/s (Appendix C.2), $\Delta_{stale} \approx 3.4$ ms.
-- **ASIC** (projected): At $\sim 1$ Gperm/s per core with 21 cores, $R_{perm} \approx 21$ Gperm/s. $\Delta_{stale} \approx 0.05$ ms.
-
-**BlockDAG context.** At 100 BPS, the block interval is 10 ms—far shorter than typical global propagation delays (50–200 ms). This is not a failure mode; it is the intended operating regime of BlockDAG protocols. Kaspa currently uses GHOSTDAG [5] at 10 BPS with $k = 124$ (assumed $D_{max} = 5$ s); DAGKnight [5] is a parameterless generalization not yet deployed. In a BlockDAG, blocks created in parallel (within each other's anticone) are all included—none are orphaned. The anticone of each block reflects the number of concurrent blocks: at block rate $\lambda$ and propagation delay $D$, the expected anticone size is $\approx 2 \lambda D$. **Larger anticones do not compromise security** (the protocol correctly identifies the honest cluster), **but they increase confirmation time** proportionally—the ordering takes longer to stabilize with more parallel blocks.
-
-**Staleness is the cost of Symbiotic mode.** Traditional PoW (SHA-256, kHeavyHash) has zero staleness: each hash is independent and can reference the latest header. ZK-SPoW's Symbiotic mode fixes $h_H$ for one Merkle commitment phase, introducing staleness of 3.4 ms (GPU) or 0.05 ms (ASIC). This is an inherent cost of embedding PoW within a batched STARK computation—the Merkle tree must be committed with a consistent header digest. The relevant question is whether this additional anticone contribution—and the proportional confirmation time increase—is material relative to the baseline anticone from network propagation delay.
-
-**Quantitative impact (simulation).** We simulate a Poisson block arrival process at 100 BPS with log-normal network propagation delays, measuring anticone size (blocks concurrent with a given block) under varying staleness. $10 \times 60$ s runs per scenario:
-
-| Network delay | No staleness | ASIC (0.05 ms) | GPU (3.4 ms) | GPU $\Delta$ |
-|---|---|---|---|---|
-| LAN (5 ms) | 1.00 | 1.02 (+1.0%) | 1.68 (+67%) | +0.68 blocks |
-| Regional (20 ms) | 4.02 | 4.03 (+0.3%) | 4.70 (+17%) | +0.68 blocks |
-| Global (50 ms) | 10.05 | 10.06 (+0.1%) | 10.73 (+6.8%) | +0.68 blocks |
-| Global (100 ms) | 20.09 | 20.10 (+0.05%) | 20.77 (+3.4%) | +0.68 blocks |
-| Global (200 ms) | 40.13 | 40.14 (+0.02%) | 40.81 (+1.7%) | +0.68 blocks |
-
-GPU staleness adds a constant ~0.68 blocks to the anticone regardless of network delay. On a global network (50–200 ms propagation), this is a **1.7–6.8% marginal increase** over the baseline anticone of 10–40 blocks. Since confirmation time scales with anticone size, GPU staleness adds a proportional ~1.7–6.8% to confirmation time—a minor but real cost of Symbiotic mode. ASIC staleness (+0.01 blocks) is unmeasurable.
-
-**Simulation parameters.** Block arrivals: Poisson at 100 BPS. Network propagation delay: log-normal with (mean, std) as shown. Per-block anticone: count of blocks within ±(delay + staleness) window. Runs: $10 \times 60$ s per scenario (total ~60,000 blocks per row). Seed: 42 (deterministic). Source code: `analysis/dagknight_staleness_sim.py` (Python 3, stdlib only, no external dependencies).
-
-**Selfish mining interaction.** An attacker cannot increase a victim's staleness—$\Delta_{stale}$ is determined by the victim's own hardware. An attacker who announces blocks at STARK phase boundaries can force honest miners to restart phases, wasting partial STARK computation. However: (1) the attacker gains no PoW advantage, since the victim's PoW tickets from the stale phase remain valid; (2) the cost to the victim is at most one phase of STARK work (~3.4 ms × $f_{sym}$); (3) the attacker cannot control timing at millisecond precision over a network with 50–200 ms propagation jitter. This "phase disruption" degrades ZK throughput, not PoW security.
-
-**Incentive-compatible behavior.** When a new block arrives mid-phase, a rational miner faces a choice: (1) complete the current phase with the now-stale header, or (2) abandon and restart with the new header. Completing is incentive-compatible: the PoW tickets remain valid (the stale block enters the DAG and is ordered normally), and the STARK proof progress is preserved. Abandoning wastes the partial phase computation. A miner should update $h_H$ at the next natural phase boundary.
-
-**Trace size tradeoff.** Larger traces ($2^\ell$) produce more useful ZK work per proof but increase the largest Merkle tree size $N_{max}$, raising $\Delta_{stale}$. At $\ell = 20$, $\Delta_{stale} \approx 3.4$ ms (GPU); at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms, exceeding one block interval at 100 BPS. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval. On ASIC ($R_{perm} \approx 21$ Gperm/s), even $\ell = 22$ yields $\Delta_{stale} \approx 0.2$ ms—well within bounds.
-
-### 2.4 Comparison with Proof-Level Approaches
-
-The key differentiator of ZK-SPoW is the *granularity* at which PoW operates within the ZK computation.
-
-| Property | SHA-256 / kHeavyHash | Proof-Level [14] | Nockchain [11] | **ZK-SPoW** |
-|---|---|---|---|---|
-| PoW granularity | 1 hash = 1 trial | 1 proof = 1 ticket | Proof → hash | **1 perm = 1 trial** |
-| Trial duration | Nanoseconds | Tens of ms–s | Seconds + μs | **Nanoseconds** |
-| Progress-free? | **Yes** (info-theoretic) | **No** — sunk cost | **Final hash: yes**; proof phase: no | **Yes** (computational, PRP) |
-| Max staleness | 0 (stateless) | Proof duration | Proof duration | **~3 ms (measured)** |
-| Losing miners' work | Security only | Proofs discarded | Proofs discarded | **ZK work preserved** |
-| Useful work | None | Proof = PoW | Proof then hash | **Perm = PoW + ZK** |
-| $U$ (per-perm) | 0% | $\sim 1/N$ | $\sim 1/N$ | **100%** (system: $f_{sym}$-limited, §5.5) |
-
-ZK-SPoW operates at the finest possible granularity—individual permutations (nanoseconds)—achieving computational progress-freedom equivalent to the information-theoretic progress-freedom of traditional hash-based PoW (Definition 2, §2.1). The STARK proof continues regardless of PoW outcomes: losing miners' ZK computation remains useful.
+**Trace size tradeoff.** Larger traces increase $\Delta_{stale}$: at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms (GPU), exceeding one block interval. On ASIC, even $\ell = 22$ yields 0.2 ms. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval.
 
 ---
 
@@ -708,7 +614,16 @@ Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW s
 
 ### 8.4 Memorylessness Comparison
 
-See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW scheme that achieves computational progress-freedom (Definition 2) equivalent to the information-theoretic progress-freedom of traditional hash-based PoW, while simultaneously producing useful computation. The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
+| Property | SHA-256 / kHeavyHash | Proof-Level [14] | Nockchain [11] | **ZK-SPoW** |
+|---|---|---|---|---|
+| PoW granularity | 1 hash = 1 trial | 1 proof = 1 ticket | Proof → hash | **1 perm = 1 trial** |
+| Trial duration | Nanoseconds | Tens of ms–s | Seconds + μs | **Nanoseconds** |
+| Progress-free? | **Yes** (info-theoretic) | **No** — sunk cost | Final hash: yes; proof: no | **Yes** (computational, PRP) |
+| Max staleness | 0 (stateless) | Proof duration | Proof duration | **~3 ms GPU / 0.05 ms ASIC** |
+| Losing miners' work | Security only | Proofs discarded | Proofs discarded | **ZK work preserved** |
+| $U$ (per-perm) | 0% | $\sim 1/N$ | $\sim 1/N$ | **100%** ($U_{sys}$: $f_{sym}$-limited, §5.5) |
+
+ZK-SPoW operates at the finest possible granularity—individual permutations (nanoseconds)—achieving computational progress-freedom equivalent to the information-theoretic progress-freedom of traditional hash-based PoW (Theorem 1, §2.2). The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
 
 ---
 
@@ -812,7 +727,7 @@ The miner cannot increase the number of PoW tickets by selecting a different tra
 
 ### B.3 Distribution Invariance
 
-Under PRP, for any distinct inputs $x_1, \ldots, x_P$ to the permutation, the outputs are jointly pseudorandom. Input distinctness holds with overwhelming probability (Lemma 1, §2.2).
+Under PRP, for any distinct inputs $x_1, \ldots, x_P$ to the permutation, the outputs are jointly pseudorandom. Input distinctness holds with overwhelming probability (Appendix D).
 
 Each permutation produces three PoW tickets. Under PRP, the success event for each permutation (at least one ticket below target $T$) is a Bernoulli trial with parameter:
 
@@ -936,6 +851,32 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p = 0.006$.
 
 **Interpretation.** The difference is statistically significant ($p = 0.006$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to vanish.
+
+---
+
+## Appendix D: Theorem 1 — Full Proof and Remarks
+
+This appendix contains the complete proof of Theorem 1 (§2.2) and supporting remarks deferred from the main text.
+
+**Setup.** Let $\pi: \mathbb{F}_p^{24} \to \mathbb{F}_p^{24}$ be the Width-24 Poseidon2 permutation. In a STARK Merkle commitment phase, the prover evaluates $\pi$ on inputs $x_1, \ldots, x_P$ where $x_j = (n_{L,j} \| n_{R,j} \| h_H)$, with $n_{L,j}, n_{R,j} \in \mathbb{F}_p^8$ (child hashes) and $h_H \in \mathbb{F}_p^8$ (fixed header digest). $P = \sum_{i=0}^{m}(N_i - 1)$ is the total internal Merkle node count.
+
+**Lemma (Input Distinctness).** In Circle STARK, leaf-level inputs are distinct by construction (evaluations at $2^\ell$ distinct domain points). At higher levels, a collision requires $\pi(x_j)[0:7] = \pi(x_{j'})[0:7]$ for distinct $x_j, x_{j'}$. Under PRP, this occurs with probability $\leq p^{-8}$ per pair. Union bound: $\Pr[\text{any collision}] < P^2/(2p^8) < 10^{-60}$ for $P \leq 10^7$. We condition on the "good event" $G$ (all inputs distinct).
+
+**Full proof of Theorem 1.**
+
+*Real world.* The prover evaluates $\pi(x_1), \ldots, \pi(x_P)$ on distinct inputs (conditioned on $G$) and derives $E_j = \{\exists\, k : \text{ticket}_{j,k} < T\}$.
+
+*Ideal world.* Replace $\pi$ with a truly random function $f$. For distinct inputs, $f(x_1), \ldots, f(x_P)$ are independent and uniform over $\mathbb{F}_p^{24}$. Each output decomposes as $\mathbb{F}_p^8 \times \mathbb{F}_p^8 \times \mathbb{F}_p^8$ (product space), so the three ticket comparisons are independent with $\Pr[\text{ticket}_{j,k} < T] = T/p^8$. Hence $\{E_j\}$ are i.i.d. Bernoulli($q$) with $q = 1-(1-T/p^8)^3$.
+
+*Indistinguishability.* Any PPT distinguisher for the event sequences composes with the event-extraction function to yield a PRP distinguisher—contradicting the assumption. ∎
+
+**PRP–PRF switching.** The statistical distance between a random permutation and a random function on $P$ queries is $\leq P^2/(2p^{24}) < 10^{-210}$ for $P = 10^7$. Absorbed into $\mathrm{negl}(\kappa)$.
+
+**Structured inputs.** Merkle feedback (parent outputs → child inputs) and Fiat-Shamir cascades create non-i.i.d. inputs. The PRP guarantee holds for *any* distinct inputs regardless of generation method; any weakness for structured inputs would constitute a Poseidon2 break.
+
+**Side information.** A miner observes STARK execution state (tree level, NTT progress) in addition to PoW outcomes. Under PRP, this does not help predict future PoW outcomes: $\pi(x_j)$ is pseudorandom regardless of how $x_j$ was generated or what the miner knows about computation progress.
+
+**Consensus sufficiency.** Nakamoto-style [Garay et al., 2015] and DAG-based [5] security proofs rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. Both operate in a computational model, so computational indistinguishability from i.i.d. suffices.
 
 ---
 
