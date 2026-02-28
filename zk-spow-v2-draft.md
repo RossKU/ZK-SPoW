@@ -12,7 +12,7 @@ Proof-of-work (PoW) blockchains expend energy solely for network security. Proof
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
 
-We do not claim protocol-level enforcement of useful work; we claim hardware-level symbiosis where useful ZK computation and PoW mining share the same permutation, conditional on external proof demand. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 50\%$ (HBM3), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.5). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7.2). Projected zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
+We do not claim protocol-level enforcement of useful work; we claim hardware-level symbiosis where useful ZK computation and PoW mining share the same permutation, conditional on external proof demand. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 98\%$ (HBM3E, compute-saturated), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.5). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7.2). Projected zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
 
 ---
 
@@ -36,7 +36,13 @@ SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each ha
 
 ### 1.3 Prior PoUW Approaches and ZK-SPoW's Direction
 
-Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where the mining computation simultaneously produces useful output. Their strict definition requires: (1) the PoW computation itself produces useful output, (2) the verifier can confirm the usefulness, and (3) the useful output is bound to the PoW evidence. Ofelimos [7] and Komargodski et al. [8, 9] demonstrate that provably secure PoUW constructions are achievable for specific problem classes (combinatorial optimization, matrix multiplication).
+Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where the mining computation simultaneously produces useful output. Their strict definition requires:
+
+1. The PoW computation itself produces useful output
+2. The verifier can confirm the usefulness
+3. The useful output is bound to the PoW evidence
+
+Ofelimos [7] and Komargodski et al. [8, 9] demonstrate that provably secure PoUW constructions are achievable for specific problem classes (combinatorial optimization, matrix multiplication).
 
 These constructions operate in the direction **PoW → useful output**, and face deployment challenges in high-throughput blockchains: they require pre-hashing, SNARGs, or domain-specific verification, and the useful computation must be compatible with the PoW's random exploration structure.
 
@@ -61,7 +67,7 @@ $$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 
 The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
 
-**System-level usefulness.** $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{sym}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{sys} = f_{sym} \times U$, ranging from ~10% (SRAM) to ~50% (HBM3) depending on memory configuration (§5.5, Appendix A). The $f_{sym}$ value accounts for both SRAM bandwidth limits and the fraction of STARK time spent in Merkle (vs NTT/FRI) phases.
+**System-level usefulness.** $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{sym}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{sys} = f_{sym} \times U$, ranging from ~10% (SRAM) to ~98% (HBM3E, compute-saturated) depending on memory configuration (§5.5, Appendix A). With pipelined proof generation, NTT and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention rather than phase sequencing.
 
 ### 1.4 Our Solution: Permutation-Level PoW Extraction
 
@@ -516,19 +522,23 @@ SRAM:     write     read/write read/write   —           read/write      read/w
 Poseidon2: Pure PoW  Pure PoW  Symbiotic+PoW Pure PoW   Pure PoW       Symbiotic+PoW
 ```
 
-During Merkle phases, Poseidon2 cores are fed Merkle data from SRAM (Symbiotic) up to the SRAM bandwidth limit; remaining cycles fill with Pure PoW. During NTT/FRI folding phases, the NTT unit uses SRAM and Poseidon2 runs 100% Pure PoW.
+**Single-proof model.** Within a single proof, phases are sequential: during Merkle phases, Poseidon2 cores are fed Merkle data from memory (Symbiotic) up to the bandwidth limit; during NTT/FRI folding phases, the NTT unit uses memory and Poseidon2 runs 100% Pure PoW.
 
-| Resource | PoW | STARK (Merkle phase) | STARK (NTT phase) |
-|---|---|---|---|
-| Poseidon2 cores | **100%** | Partial (SRAM-starved) | **100%** Pure PoW |
-| NTT unit | 0% | 0% | **100%** |
-| SRAM bandwidth | 0% | **100%** (Merkle I/O) | **100%** (NTT I/O) |
+**Pipelined proof generation.** With continuous proof demand, multiple proofs are in-flight simultaneously. While proof $n$ is in its NTT phase, proof $n-1$'s Merkle data is already in memory and can feed Poseidon2 cores. The NTT and Merkle phases of different proofs overlap:
 
-**$f_{sym}$ derivation.** Let $T_{merkle}$ be the total time in Merkle phases and $T_{total}$ be the total STARK proving time. Within Merkle phases, the fraction of Poseidon2 cycles fed from SRAM is $\min(1, BW/(96 \cdot R_{perm}))$, where 96 bytes = 32 read (left) + 32 read (right) + 32 write (parent) per hash. During non-Merkle phases, Poseidon2 is 100% Pure PoW. Therefore:
+```
+Proof n-1:        [NTT] → [Merkle] → [NTT] → ...
+Proof n  :                 [NTT] → [Merkle] → ...
+Poseidon2:         PoW      Sym       Sym      Sym
+```
 
-$$f_{sym} = \frac{T_{merkle}}{T_{total}} \times \min\!\left(1,\; \frac{BW/96}{R_{perm}}\right)$$
+In this model, Poseidon2 is nearly always fed Merkle data. The constraint is no longer phase sequencing but **memory bandwidth contention**: NTT and Merkle I/O share the memory bus simultaneously.
 
-On ASIC, Merkle phases dominate STARK time ($T_{merkle}/T_{total} \gtrsim 95\%$) because Poseidon2 is SRAM-starved while the NTT unit completes quickly. As memory bandwidth increases, Merkle phases shorten and NTT phases become a larger fraction of $T_{total}$, reducing $f_{sym}$ below the naive $BW/(96 \cdot R_{perm})$ estimate. See Appendix A.3 for concrete values.
+**$f_{sym}$ derivation (pipelined).** Each Merkle hash requires 96 bytes of memory I/O (32 read left + 32 read right + 32 write parent). NTT butterflies require ~20 bytes each (read 2 + twiddle, write 2 M31 elements) at ~1 Gbfly/s, consuming $BW_{ntt} \approx 20$ GB/s. The effective bandwidth available for Merkle I/O is $BW - BW_{ntt}$:
+
+$$f_{sym} = \min\!\left(1 - \epsilon,\; \frac{(BW - BW_{ntt})/96}{R_{perm}}\right)$$
+
+where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, and pipeline drain between proofs. See Appendix A.3 for concrete values.
 
 **Width-24 efficiency.** Compression function mode halves STARK's Poseidon2 cycle consumption versus sponge mode (§4.2), freeing more cycles for PoW.
 
@@ -615,10 +625,11 @@ Four designs compared under identical die area and power budget:
 |---|---|---|---|---|---|
 | Pure PoW | 95% Pos2, 5% ctrl | ~1.9 $\mathcal{H}$ | 0 | 0% | Yes |
 | Pure Stwo | 20% Pos2, 40% NTT, 35% SRAM | 0 | $Z_{max}$ | 100% | No |
-| **ZK-SPoW** | **50% Pos2, 25% NTT, 20% SRAM** | $\mathcal{H}$ | $Z$ | **100%** ($f_{sym}$~10%) | **Yes** |
-| ZK-SPoW+HBM | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | 100% ($f_{sym}$~50%) | Yes |
+| **ZK-SPoW (SRAM)** | **50% Pos2, 25% NTT, 20% SRAM** | $\mathcal{H}$ | $Z$ | **$U_{sys}$~10%** | **Yes** |
+| ZK-SPoW (HBM3) | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | $U_{sys}$~60% | Yes |
+| ZK-SPoW (HBM3E) | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | $U_{sys}$~98% | Yes |
 
-Pure PoW achieves ~1.9× hashrate on a die-area basis but produces no ZK proofs ($U = 0\%$). On hashes-per-watt, the gap narrows to ~1.1–1.2× (idle NTT and SRAM contribute static leakage). Pure Stwo cannot mine. ZK-SPoW achieves $U = 100\%$ during STARK proving; the fraction of cycles in proving ($f_{sym}$) depends on memory bandwidth and STARK pipeline phase ratio (~10% for 32 MB SRAM, ~50% for HBM3; Appendix A.3).
+Pure PoW achieves ~1.9× hashrate on a die-area basis but produces no ZK proofs ($U = 0\%$). On hashes-per-watt, the gap narrows to ~1.1–1.2× (idle NTT and SRAM contribute static leakage). Pure Stwo cannot mine. ZK-SPoW achieves $U = 100\%$ during STARK proving; the fraction of cycles in proving ($f_{sym}$) depends on memory bandwidth (~10% for 32 MB SRAM, ~60% for HBM3, ~98% for HBM3E; Appendix A.3). With pipelined proof generation, NTT and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention.
 
 ### 7.2 Economic Dominance
 
@@ -721,7 +732,7 @@ See §2.4 (Table 1) for the full comparison. ZK-SPoW is the only ZK-based PoW sc
 
 ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), preserving the progress-freedom required by Nakamoto-style and DAG-based consensus. The architecture is hardware-symbiotic: PoW mining and STARK proving share the same permutation on the same silicon, with zero throughput switching overhead between modes.
 
-The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}50\%$) is constrained by SRAM bandwidth and STARK pipeline phase ratios (§5.5), and depends entirely on external ZK proof demand (§7.2). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
+The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.5), and depends entirely on external ZK proof demand (§7.2). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
 
 Despite these limitations, ZK-SPoW demonstrates that useful computation and memoryless PoW are not inherently incompatible at the hardware level—the tension identified in prior PoUW work can be sidestepped by operating at the permutation granularity rather than the proof granularity.
 
@@ -756,30 +767,22 @@ $$R_{merkle} = \min\!\left(R_{perm},\; \frac{BW}{96}\right)$$
 
 For 200 GB/s SRAM: $R_{merkle} = 200\text{G}/96 \approx 2.08\text{G hash/s}$, well below $R_{perm} = 21\text{G}$. The remaining $21 - 2.08 = 18.92\text{G}$ perm/s fill with Pure PoW.
 
-**Across the full STARK pipeline**, $f_{sym}$ also depends on the fraction of time spent in Merkle phases (§5.5):
+**Pipelined proof generation** (§5.5). With continuous proof demand, NTT and Merkle phases of different proofs overlap. The NTT unit consumes $BW_{ntt} \approx 20$ GB/s (~20 bytes/butterfly × 1 Gbfly/s), leaving the remainder for Merkle I/O:
 
-$$f_{sym} = \frac{T_{merkle}}{T_{total}} \times \frac{R_{merkle}}{R_{perm}}$$
+$$f_{sym} = \min\!\left(1 - \epsilon,\; \frac{(BW - BW_{ntt})/96}{R_{perm}}\right)$$
 
-We estimate $T_{merkle}/T_{total}$ for a trace of $2^{20}$ rows (1.57M Merkle permutations, ~20M NTT butterflies, $m \approx 10$ FRI rounds with geometrically shrinking trees):
+where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, and pipeline drain.
 
-| Phase | Operations | ASIC throughput | Time |
-|---|---|---|---|
-| NTT (LDE) | ~20M butterfly | NTT unit ~1 Gbfly/s | ~20 μs |
-| Merkle (initial) | 1.57M hash | 2.08G hash/s | ~750 μs |
-| FRI fold (×m) | ~2M butterfly total | NTT unit | ~2 μs |
-| FRI Merkle (×m) | ~1.57M hash total | 2.08G hash/s | ~750 μs |
-| **Total** | | | **~1,522 μs** |
-| **Merkle fraction** | | | **~98%** |
-
-| Memory | Bandwidth | $R_{merkle}$ | $T_{merkle}/T_{total}$† | $f_{sym}$ | Proofs/sec |
+| Memory | Bandwidth | $BW - BW_{ntt}$ | $R_{merkle}$ | $f_{sym}$ | Proofs/sec |
 |---|---|---|---|---|---|
-| SRAM 32 MB | 200 GB/s | 2.08G | ~98% | **~10%** | ~260 |
-| SRAM 64 MB | 400 GB/s | 4.17G | ~95% | **~19%** | ~520 |
-| HBM3 8 GB | 1.2 TB/s | 12.5G | ~85% | **~50%** | ~1,300 |
-| HBM3E 16 GB | 2.4 TB/s | 21G‡ | ~75% | **~75%** | ~1,970 |
+| SRAM 32 MB | 200 GB/s | 180 GB/s | 1.88G | **~9%** | ~250 |
+| SRAM 64 MB | 400 GB/s | 380 GB/s | 3.96G | **~19%** | ~520 |
+| HBM3 8 GB | 1.2 TB/s | 1.18 TB/s | 12.3G | **~59%** | ~1,600 |
+| HBM3E 16 GB | 2.4 TB/s | 2.38 TB/s | 21G† | **~98%** | ~2,570 |
 
-†As memory bandwidth increases, Merkle phases shorten and NTT/FRI phases become a larger fraction of total time.
-‡Compute-saturated: $R_{merkle}$ capped at $R_{perm} = 21\text{G}$.
+†Compute-saturated: $R_{merkle}$ capped at $R_{perm} = 21\text{G}$. The ~2% gap from 100% reflects proof transition overhead ($\epsilon$).
+
+**SRAM pipelining constraint.** SRAM configurations (32–64 MB) may lack sufficient capacity to hold two proofs' data simultaneously (each proof requires ~4–8 MB for trace + extended evaluation). In this case, proof pipelining is limited, and the single-proof sequential model applies: $f_{sym}$ depends on both $R_{merkle}/R_{perm}$ and phase sequencing. The values above assume pipelining is feasible; for SRAM-only designs, $f_{sym}$ may be slightly lower (~8–17%). HBM configurations (8–16 GB) can hold hundreds of proofs and pipeline without constraint.
 
 **NoC area and power.** Delivering 200 GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7 nm, a 200 GB/s mesh NoC (e.g., ring or 2D mesh topology) consumes approximately 1–3% of die area and 0.5–1.5 W, depending on topology and wire length. The 5% Control & I/O budget (§A.1) is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7–10% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50% to ~47% (20 cores instead of 21). This is a ~5% hashrate reduction—non-negligible but does not qualitatively change the Pareto analysis (§7). The die allocation in §A.1 should be considered approximate; detailed physical design is beyond this paper's scope.
 
