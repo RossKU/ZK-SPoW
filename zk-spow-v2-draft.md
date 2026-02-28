@@ -56,7 +56,7 @@ More precisely, ZK-SPoW is a **hardware-symbiotic architecture**: the same Posei
 
 **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
-The mechanism: STARK proof generation requires millions of Merkle hashes. Each Width-24 Poseidon2 Merkle hash takes $(left\_child, right\_child, header\_digest)$ as input and produces $(pow\_ticket_0, pow\_ticket_1, pow\_ticket_2)$ as output, where $pow\_ticket_0 = merkle\_parent$ simultaneously advances the ZK proof. All three output regions are checked against the difficulty target. The miner cannot choose the Merkle inputs—they are determined by the STARK computation.
+The mechanism: STARK proof generation requires millions of Merkle hashes. Each Width-24 Poseidon2 Merkle hash takes (left child, right child, header digest) as input and produces three PoW tickets as output. Ticket 0 equals the Merkle parent and simultaneously advances the ZK proof. All three output regions are checked against the difficulty target. The miner cannot choose the Merkle inputs—they are determined by the STARK computation.
 
 **Definition (Usefulness).**
 
@@ -193,9 +193,9 @@ At throughput $R_{perm}$, phase $i$ completes in $t_i = (N_i - 1)/R_{perm}$ seco
 - **GPU** (measured): At $\ell = 20$ (trace size $2^{20}$), the largest Merkle tree has $\sim 2^{20}$ permutations. At 305 Mperm/s (Appendix C.2), $\Delta_{stale} \approx 3.4$ ms.
 - **ASIC** (projected): At $\sim 1$ Gperm/s per core with 21 cores, $R_{perm} \approx 21$ Gperm/s. $\Delta_{stale} \approx 0.05$ ms.
 
-**DAGKnight tolerance.** At 100 BPS, the theoretical block interval is 10 ms. However, the 10 ms figure assumes zero network propagation delay. In practice, global P2P networks exhibit propagation delays of 50–200 ms (ping RTT), and DAGKnight is specifically designed to tolerate this: its anticone parameter (typically $k \geq 10$) accepts blocks with parent sets many blocks deep, tolerating $\sim 100$+ ms of latency.
+**BlockDAG context.** At 100 BPS, the block interval is 10 ms—far shorter than typical global propagation delays (50–200 ms). This is not a failure mode; it is the intended operating regime of BlockDAG protocols. Kaspa currently uses GHOSTDAG [5] at 10 BPS with $k = 124$ (assumed $D_{max} = 5$ s); DAGKnight [5] is a parameterless generalization not yet deployed. In a BlockDAG, blocks created in parallel (within each other's anticone) are all included—none are orphaned. The anticone of each block reflects the number of concurrent blocks: at block rate $\lambda$ and propagation delay $D$, the expected anticone size is $\approx 2 \lambda D$. **Larger anticones do not compromise security** (the protocol correctly identifies the honest cluster), **but they increase confirmation time** proportionally—the ordering takes longer to stabilize with more parallel blocks.
 
-**Staleness is the cost of Symbiotic mode.** Traditional PoW (SHA-256, kHeavyHash) has zero staleness: each hash is independent and can reference the latest header. ZK-SPoW's Symbiotic mode fixes $h_H$ for one Merkle commitment phase, introducing staleness of 3.4 ms (GPU) or 0.05 ms (ASIC). This is an inherent cost of embedding PoW within a batched STARK computation—the Merkle tree must be committed with a consistent header digest. The relevant question is whether this cost is material relative to the network propagation delays that DAGKnight already tolerates.
+**Staleness is the cost of Symbiotic mode.** Traditional PoW (SHA-256, kHeavyHash) has zero staleness: each hash is independent and can reference the latest header. ZK-SPoW's Symbiotic mode fixes $h_H$ for one Merkle commitment phase, introducing staleness of 3.4 ms (GPU) or 0.05 ms (ASIC). This is an inherent cost of embedding PoW within a batched STARK computation—the Merkle tree must be committed with a consistent header digest. The relevant question is whether this additional anticone contribution—and the proportional confirmation time increase—is material relative to the baseline anticone from network propagation delay.
 
 **Quantitative impact (simulation).** We simulate a Poisson block arrival process at 100 BPS with log-normal network propagation delays, measuring anticone size (blocks concurrent with a given block) under varying staleness. $10 \times 60$ s runs per scenario:
 
@@ -207,13 +207,13 @@ At throughput $R_{perm}$, phase $i$ completes in $t_i = (N_i - 1)/R_{perm}$ seco
 | Global (100 ms) | 20.09 | 20.10 (+0.05%) | 20.77 (+3.4%) | +0.68 blocks |
 | Global (200 ms) | 40.13 | 40.14 (+0.02%) | 40.81 (+1.7%) | +0.68 blocks |
 
-The GPU staleness adds a constant ~0.68 blocks to the anticone regardless of network delay. On a realistic global network (50–200 ms propagation), this is a **1.7–6.8% marginal increase** over the baseline anticone of 10–40 blocks—well within DAGKnight's tolerance. ASIC staleness (+0.01 blocks) is unmeasurable.
+GPU staleness adds a constant ~0.68 blocks to the anticone regardless of network delay. On a global network (50–200 ms propagation), this is a **1.7–6.8% marginal increase** over the baseline anticone of 10–40 blocks. Since confirmation time scales with anticone size, GPU staleness adds a proportional ~1.7–6.8% to confirmation time—a minor but real cost of Symbiotic mode. ASIC staleness (+0.01 blocks) is unmeasurable.
 
 **Simulation parameters.** Block arrivals: Poisson at 100 BPS. Network propagation delay: log-normal with (mean, std) as shown. Per-block anticone: count of blocks within ±(delay + staleness) window. Runs: $10 \times 60$ s per scenario (total ~60,000 blocks per row). Seed: 42 (deterministic). Source code: `analysis/dagknight_staleness_sim.py` (Python 3, stdlib only, no external dependencies).
 
 **Selfish mining interaction.** An attacker cannot increase a victim's staleness—$\Delta_{stale}$ is determined by the victim's own hardware. An attacker who announces blocks at STARK phase boundaries can force honest miners to restart phases, wasting partial STARK computation. However: (1) the attacker gains no PoW advantage, since the victim's PoW tickets from the stale phase remain valid; (2) the cost to the victim is at most one phase of STARK work (~3.4 ms × $f_{sym}$); (3) the attacker cannot control timing at millisecond precision over a network with 50–200 ms propagation jitter. This "phase disruption" degrades ZK throughput, not PoW security.
 
-**Incentive-compatible behavior.** When a new block arrives mid-phase, a rational miner faces a choice: (1) complete the current phase with the now-stale header, or (2) abandon and restart with the new header. Completing is incentive-compatible: the PoW tickets remain valid (staleness is within DAGKnight tolerance), and the STARK proof progress is preserved. Abandoning wastes the partial phase computation. A miner should update $h_H$ at the next natural phase boundary.
+**Incentive-compatible behavior.** When a new block arrives mid-phase, a rational miner faces a choice: (1) complete the current phase with the now-stale header, or (2) abandon and restart with the new header. Completing is incentive-compatible: the PoW tickets remain valid (the stale block enters the DAG and is ordered normally), and the STARK proof progress is preserved. Abandoning wastes the partial phase computation. A miner should update $h_H$ at the next natural phase boundary.
 
 **Trace size tradeoff.** Larger traces ($2^\ell$) produce more useful ZK work per proof but increase the largest Merkle tree size $N_{max}$, raising $\Delta_{stale}$. At $\ell = 20$, $\Delta_{stale} \approx 3.4$ ms (GPU); at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms, exceeding one block interval at 100 BPS. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval. On ASIC ($R_{perm} \approx 21$ Gperm/s), even $\ell = 22$ yields $\Delta_{stale} \approx 0.2$ ms—well within bounds.
 
@@ -309,7 +309,7 @@ pow_hash1 = (S[8], S[9], ..., S[15])           // 8 M31 elements = 248 bits
 pow_hash2 = (S[16], S[17], ..., S[23])         // 8 M31 elements = 248 bits
 valid iff pow_hash0 < target OR pow_hash1 < target OR pow_hash2 < target
 ```
-where $(v_1, v_2)$ are 8 M31 elements each (64 bytes total nonce). The permutation operates in **compression function mode**—all 24 input elements are visible (no hidden capacity). Each permutation produces **three PoW tickets**. The comparison $pow\_hash < target$ interprets both as 248-bit unsigned integers via big-endian concatenation of 8 M31 elements, each zero-padded to 31 bits. In Symbiotic mode, $pow\_hash_0 = merkle\_parent$: the same output advances the ZK proof and serves as a PoW ticket.
+where $(v_1, v_2)$ are 8 M31 elements each (64 bytes total nonce). The permutation operates in **compression function mode**—all 24 input elements are visible (no hidden capacity). Each permutation produces **three PoW tickets**. The comparison interprets both hash and target as 248-bit unsigned integers via big-endian concatenation of 8 M31 elements, each zero-padded to 31 bits. In Symbiotic mode, pow_hash0 equals the Merkle parent: the same output advances the ZK proof and serves as a PoW ticket.
 
 **Verification cost:** One Poseidon2 permutation (width 24) + three target comparisons + one header pre-hash (amortized).
 
@@ -505,7 +505,7 @@ The transition is **per-cycle and linear**, not a discrete mode switch. The pipe
 
 **Proposition 2.** *Total PoW hashrate $\mathcal{H}$ is independent of the operating mode.*
 
-*Argument.* $\mathcal{H} = N_{cores} \times \text{throughput\_per\_core}$. Each core's throughput is 1 hash per pipeline depth cycles (fully pipelined), regardless of input source. The input MUX is combinational logic (~300 gates, 2:1 selection on 16 × 31-bit words).
+*Argument.* $\mathcal{H} = N_{\text{cores}} \times R_{\text{core}}$. Each core's throughput is 1 hash per pipeline depth cycles (fully pipelined), regardless of input source. The input MUX is combinational logic (~300 gates, 2:1 selection on 16 × 31-bit words).
 
 **MUX critical path impact.** The MUX adds gate delay to the pipeline's first stage. At 7 nm, a 2:1 MUX contributes ~20–30 ps of propagation delay. The Poseidon2 pipeline's critical path is the S-box ($x \mapsto x^5$, requiring two M31 multiplications in series: ~200–300 ps at 7 nm). The MUX delay is <15% of the critical path—absorbable within the pipeline stage's timing margin without reducing clock frequency. If timing closure requires it, the MUX can be retimed into a dedicated pipeline stage at the cost of 1 cycle of latency (not throughput). The "zero cycles overhead" claim refers to throughput (pipelined), not latency; we clarify: **zero throughput overhead, ≤1 cycle latency overhead.**
 
