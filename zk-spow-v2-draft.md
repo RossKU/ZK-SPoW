@@ -146,7 +146,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 | $h_H$ | Header digest: $\text{PoseidonSponge}(H \text{ excluding nonce}) \in \mathbb{F}_p^k$ |
 | $k$ | Header digest element count ($k = 8$ for symmetric I/O and three PoW tickets) |
 | $(v_1, v_2)$ | Nonce: $v_1, v_2 \in \mathbb{F}_p^8$ |
-| $T$ | Target $\in \mathbb{F}_p^8$ (difficulty-adjusted) |
+| $T$ | Difficulty target (integer; 8 M31 elements interpreted as 248-bit big-endian value) |
 | $p_t$ | Single-ticket success probability: $p_t = T/p^8$ (see Remark below) |
 | $q$ | Per-permutation success probability: $q = 1 - (1-p_t)^3$ |
 | $S$ | Poseidon2 state after permutation, $S \in \mathbb{F}_p^t$ |
