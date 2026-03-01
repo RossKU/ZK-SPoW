@@ -353,6 +353,8 @@ The header digest $h_H$ compresses the block header into $k$ field elements. If 
 
 ## 5. Operating Modes
 
+The following analysis assumes a hypothetical Poseidon2 ASIC; architecture estimates are in Appendix A.
+
 ### 5.1 Symbiotic Mode (Stwo Prover Active)
 
 When ZK proof demand exists, the ASIC runs the Stwo prover. The STARK proof generation pipeline:
