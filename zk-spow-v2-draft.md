@@ -105,7 +105,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 A PoW scheme is *progress-free* if each trial's success probability is independent of all prior outcomes—i.e., the success events form an i.i.d. Bernoulli($q$) sequence, yielding Poisson block arrivals [Garay et al., 2015]. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
 
-Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security, since these proofs operate in a computational model [5].
+Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security: the adversary in these proofs is PPT [Garay et al., 2015; 5], so computational indistinguishability from i.i.d. preserves all security bounds.
 
 **Why proof-level PoW fails.** If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80% completion has observably higher conditional success probability than one at 10%.
 
@@ -878,7 +878,7 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 **Side information.** A miner observes STARK execution state (tree level, NTT progress) in addition to PoW outcomes. Under PRP, this does not help predict future PoW outcomes: $\pi(x_j)$ is pseudorandom regardless of how $x_j$ was generated or what the miner knows about computation progress.
 
-**Consensus sufficiency.** Nakamoto consensus security proofs [Garay et al., 2015; 5] rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. These proofs operate in a computational model, so computational indistinguishability from i.i.d. suffices.
+**Consensus sufficiency.** Nakamoto consensus security proofs—chain-based [Garay et al., 2015] and DAG-based [5]—rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. The adversary in both frameworks is PPT, so computational indistinguishability from i.i.d. preserves all security bounds.
 
 ---
 
