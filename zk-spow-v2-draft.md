@@ -125,9 +125,9 @@ The full proof (real–ideal reduction) and details on input distinctness, struc
 
 In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment phase. Traditional PoW has zero staleness (each hash references the latest header); ZK-SPoW introduces staleness $\Delta_{stale} \leq N_{max}/R_{perm}$, where $N_{max}$ is the largest Merkle tree size.
 
-**Concrete bound (GPU, measured):** $\Delta_{stale} \approx 3.4$ ms at $\ell = 20$, 305 Mperm/s.
+**Concrete bound (GPU, measured):** $\Delta_{stale} \approx 3.4$ ms at $\ell = 20$, 305 Mperm/s. This is the worst case—a new header arriving at the start of a Merkle phase forces the entire phase to complete with the stale header. On average, headers change mid-phase, so typical staleness is ~$\Delta_{stale}/2$.
 
-**Staleness relative to propagation delay.** At 100 BPS, the block interval is 10 ms, but global P2P networks exhibit propagation delays of 50–200 ms. In a BlockDAG [5], the relevant baseline is propagation delay, not block interval—blocks created in parallel are all included in the DAG regardless. GPU staleness of 3.4 ms is **1.7–6.8%** of the propagation delay (3.4/200 – 3.4/50), adding a negligible effective delay to a system already operating with tens to hundreds of milliseconds of propagation latency.
+**Staleness relative to propagation delay.** At 100 BPS, the block interval is 10 ms, but global P2P networks exhibit propagation delays of 50–200 ms under normal conditions (and significantly longer during network congestion or partitions). In a BlockDAG [5], the relevant baseline is propagation delay, not block interval—blocks created in parallel are all included in the DAG regardless. Worst-case GPU staleness of 3.4 ms is **1.7–6.8%** of the best-case propagation delay (3.4/200 – 3.4/50); under realistic network conditions the ratio is smaller still.
 
 **Selfish mining.** An attacker announcing blocks at phase boundaries can waste victims' partial STARK computation, but gains no PoW advantage—stale tickets remain valid. The cost is at most one phase of ZK throughput (~3.4 ms × $f_{sym}$), not PoW security. Precision timing is impractical over 50–200 ms network jitter.
 
