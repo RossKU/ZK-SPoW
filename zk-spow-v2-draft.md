@@ -230,11 +230,11 @@ For Merkle tree commitments, each node hash requires two sponge absorptions (2 p
 
 **Design Alternatives.** Three approaches to integrate header digest into the Merkle hash:
 
-| Design | Width | Mode | Perm/Merkle | Perm/PoW | Core Δ | Die Δ |
-|---|---|---|---|---|---|---|
-| A: Header re-hash | 16 | Sponge | 2 | 4 | 0% | 0% |
-| B: Width 20 | 20 | Compression | 1 | 1 | +22% | ~+11% |
-| **C: Width 24** | **24** | **Compression** | **1** | **1** | **+44–105%** | **~+22–50%** |
+| Design | Width | Mode | Perm/Merkle | Perm/PoW |
+|---|---|---|---|---|
+| A: Header re-hash | 16 | Sponge | 2 | 4 |
+| B: Width 20 | 20 | Compression | 1 | 1 |
+| **C: Width 24** | **24** | **Compression** | **1** | **1** |
 
 **Design A** requires no Stwo modification but costs 4 permutations per PoW draw (2 Merkle + 2 header binding). **Design B** provides only 4 M31 elements (124 bits) for header digest—below the 128-bit birthday bound target. **Design C (selected)** achieves symmetric 8+8+8 I/O with 1 permutation per Merkle hash and per PoW draw, 248-bit header digest (birthday bound $2^{124}$), and three PoW tickets per permutation. Width 24 is within the Poseidon2 paper's analyzed parameter range [3].
 
@@ -255,7 +255,7 @@ Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 | S-box operations | 142 | 214 | +51% |
 | State registers | 16 × 31 = 496 bits | 24 × 31 = 744 bits | +50% |
 
-**Core area overhead: +44% (datapath width) to ~+105% (fully pipelined).** Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (§6.3), adding +36% pipeline depth. Die area impact: ~+22% to ~+50% (Poseidon2 is 50% of die; Appendix A). Per-permutation data overhead: 8/24 ≈ 33% of state carries header digest rather than ZK data.
+Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (§6.3), adding +36% pipeline depth. Per-permutation data overhead: 8/24 ≈ 33% of state carries header digest rather than ZK data. ASIC area implications are analyzed in Appendix A.
 
 **Compression Function vs Sponge.**
 
