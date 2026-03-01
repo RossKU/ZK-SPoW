@@ -24,6 +24,8 @@ PoW blockchains waste energy on security-only computation (§1.1), yet replacing
 
 Traditional PoW schemes produce no output beyond network security. The entire energy expenditure is justified solely by the security guarantees it provides.
 
+Throughout this paper, we use Kaspa [6] as the reference case: 100 BPS with kHeavyHash PoW and Stwo [4] (Poseidon2 over M31) as the STARK backend. At 100 BPS the block interval is 10 ms—the most demanding condition for header staleness and progress-freedom—making it a useful upper bound for design analysis.
+
 ### 1.2 The Memoryless Requirement in Proof of Work
 
 A PoW scheme is *progress-free* (or *memoryless*) if the probability of finding a valid block on any trial is independent of all previous trials. This property is fundamental:
@@ -374,7 +376,7 @@ if S[0..7] < target OR S[8..15] < target OR S[16..23] < target -> BLOCK FOUND
 
 Every permutation simultaneously advances the ZK proof and produces PoW tickets ($U = 100\%$). GPU validation confirms up to 136.39M PoW tickets/s as a byproduct of STARK proof generation (Appendix C.1).
 
-**Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; between phases it updates to the current chain tip. Maximum staleness is one Merkle phase—see Theorem 2 (§2.3).
+**Header freshness.** A STARK proof spans multiple Merkle commitment phases—typically $O(10)$. The header digest is fixed per phase; between phases it updates to the current chain tip. Maximum staleness is one Merkle phase (§2.3).
 
 ### 5.2 Pure PoW Mode (No ZK Demand)
 
@@ -874,7 +876,7 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 **Side information.** A miner observes STARK execution state (tree level, NTT progress) in addition to PoW outcomes. Under PRP, this does not help predict future PoW outcomes: $\pi(x_j)$ is pseudorandom regardless of how $x_j$ was generated or what the miner knows about computation progress.
 
-**Consensus sufficiency.** Nakamoto-style [Garay et al., 2015] and DAG-based [5] security proofs rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. Both operate in a computational model, so computational indistinguishability from i.i.d. suffices.
+**Consensus sufficiency.** Nakamoto consensus security proofs [Garay et al., 2015; 5] rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. These proofs operate in a computational model, so computational indistinguishability from i.i.d. suffices.
 
 ---
 
