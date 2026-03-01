@@ -182,7 +182,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 | Merkle hash | 2 permutations per node (sponge: absorb left[8], absorb right[8]) |
 | Commitment hash | Blake2s (base layer), Poseidon2 (recursive proofs) |
 
-**Note:** All security claims in this paper assume final production round constants. The current Stwo implementation uses placeholder values (`EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly set to `1234`).
+**Note:** All security claims in this paper assume final production round constants. As of writing, production round constants for Poseidon2 over M31 have not been finalized; the Stwo implementation uses development placeholders (`EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly set to `1234`).
 
 **Remark (Probability space).** Each ticket is an element of $\mathbb{F}_p^8$, which has $p^8$ elements—not $2^{248}$. Ticket comparison and the difficulty target $T$ operate in the natural ordering of $\mathbb{F}_p^8$ (lexicographic, with each element in $\{0, \ldots, p-1\}$). The success probability is therefore $p_t = T/p^8$. The approximation $p^8 \approx 2^{248}$ introduces a relative error of $1 - (p/2^{31})^8 = 1 - ((2^{31}-1)/2^{31})^8 \approx 8 \cdot 2^{-31} \approx 3.7 \times 10^{-9}$, which is negligible for all practical difficulty targets. Throughout this paper we use the exact definition $p_t = T/p^8$; the notation "$248$-bit" refers to the bit-length of the representation, not the exact cardinality of the probability space.
 
