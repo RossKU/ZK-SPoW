@@ -142,10 +142,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 | $\mathbb{F}_p$ | Finite field, $p = 2^{31}-1$ (Mersenne prime M31) |
 | $\text{Poseidon2}_\pi$ | Poseidon2 permutation over $\mathbb{F}_p^t$ |
 | $t$ | State width (number of field elements in permutation) |
-| $r$ | Rate: number of input/output elements (sponge mode) |
-| $c$ | Capacity: security parameter (sponge mode; hidden elements) |
-| $n$ | Hash output size in field elements ($n = 8$, giving 248 bits) |
-| $H$ | Block header (all consensus fields; see §4.4). Not to be confused with per-miner trial rate $H_{rate}$ |
+| $H$ | Block header (all consensus fields; see §4.4) |
 | $h_H$ | Header digest: $\text{PoseidonSponge}(H \text{ excluding nonce}) \in \mathbb{F}_p^k$ |
 | $k$ | Header digest element count ($k = 8$ for symmetric I/O and three PoW tickets) |
 | $(v_1, v_2)$ | Nonce: $v_1, v_2 \in \mathbb{F}_p^8$ |
@@ -153,20 +150,24 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 | $p_t$ | Single-ticket success probability: $p_t = T/p^8$ (see Remark below) |
 | $q$ | Per-permutation success probability: $q = 1 - (1-p_t)^3$ |
 | $S$ | Poseidon2 state after permutation, $S \in \mathbb{F}_p^t$ |
-| $N$ | Number of miners in the network. Distinguished from $N_i$ (Merkle tree leaf count) by subscript |
+| $N$ | Number of miners in the network |
 | $N_i$ | Number of leaves in Merkle commitment phase $i$ |
+| $N_{spow}$ | Number of ZK-SPoW miners (subset of $N$) |
 | $m$ | Number of FRI folding rounds |
 | $P$ | Total Poseidon2 permutations across all STARK phases: $P = \sum_{i=0}^{m}(N_i - 1)$ |
 | $\ell$ | Trace size exponent (trace has $2^\ell$ rows) |
-| $U$ | Usefulness: ZK-contributing trials / total mining trials (§1.3) |
+| $U$ | Per-permutation usefulness: ZK-contributing trials / total mining trials (§1.3) |
+| $U_{sys}$ | System-level time-averaged usefulness: $U_{sys} = f_{sym} \times U$ |
 | $d$ | S-box exponent ($x \mapsto x^d$; $d = 5$ for Poseidon2) |
 | $f_{sym}$ | Fraction of Poseidon2 cycles executing STARK Merkle hashes |
 | $\mathcal{H}$ | Total PoW hashrate (network-wide) |
 | $R_{perm}$ | Permutation throughput (permutations per second) |
-| $K$ | Number of distinct traces in multi-trial grinding analysis |
+| $K$ | Number of distinct traces in multi-trial grinding analysis (Appendix B.5) |
 | $B$ | Block reward |
 | $Z$ | ZK proof throughput (proofs per second per miner) |
 | $F$ | Fee per ZK proof |
+| $D$ | Network-wide ZK proof demand (proofs per second) |
+| $\alpha$ | Pure PoW efficiency advantage over ZK-SPoW ASIC ($\alpha \approx 1.1$–$1.2$) |
 
 **Stwo baseline parameters** (confirmed from source code [4]):
 
