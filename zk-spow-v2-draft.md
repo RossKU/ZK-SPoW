@@ -127,13 +127,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 
 **Concrete bound (GPU, measured):** $\Delta_{stale} \approx 3.4$ ms at $\ell = 20$, 305 Mperm/s.
 
-**Impact on BlockDAG consensus.** At 100 BPS, global propagation delays (50–200 ms) produce baseline anticone sizes of 10–40 blocks. In a BlockDAG [5], parallel blocks are all included—larger anticones do not compromise security, but increase confirmation time proportionally. Simulation ($10 \times 60$ s runs, Poisson arrivals, log-normal delays; source: `analysis/dagknight_staleness_sim.py`) shows GPU staleness adds a constant +0.68 blocks to the anticone—a **1.7–6.8% marginal increase** on global networks, with a proportional confirmation time cost.
-
-| Network delay | Baseline anticone | With GPU (3.4 ms) | Marginal increase |
-|---|---|---|---|
-| 5 ms (LAN) | 1.00 | 1.68 | +0.68 (+67%) |
-| 50 ms (global) | 10.05 | 10.73 | +0.68 (+6.8%) |
-| 200 ms (global) | 40.13 | 40.81 | +0.68 (+1.7%) |
+**Staleness relative to propagation delay.** At 100 BPS, the block interval is 10 ms, but global P2P networks exhibit propagation delays of 50–200 ms. In a BlockDAG [5], the relevant baseline is propagation delay, not block interval—blocks created in parallel are all included in the DAG regardless. GPU staleness of 3.4 ms is **1.7–6.8%** of the propagation delay (3.4/200 – 3.4/50), adding a negligible effective delay to a system already operating with tens to hundreds of milliseconds of propagation latency.
 
 **Selfish mining.** An attacker announcing blocks at phase boundaries can waste victims' partial STARK computation, but gains no PoW advantage—stale tickets remain valid. The cost is at most one phase of ZK throughput (~3.4 ms × $f_{sym}$), not PoW security. Precision timing is impractical over 50–200 ms network jitter.
 
@@ -639,7 +633,7 @@ ZK-SPoW operates at the finest possible granularity—individual permutations (n
 
 4. **ZK demand viability.** §7.2 derives the equilibrium condition and demand scarcity risk. The critical open question is whether sustained ZK proof demand at the required scale ($\gtrsim 10^5$ proofs/s network-wide) will materialize. A dynamic simulation of ZK-SPoW vs Pure PoW ASIC competition under stochastic ZK demand—including miner entry/exit dynamics and difficulty adjustment feedback—would quantify the collapse threshold more precisely. The source of demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
 
-5. **Full DAGKnight consensus simulation.** §2.3 simulates anticone size impact (1.7–6.8% marginal increase for GPU). A full DAGKnight consensus simulation—modeling blue set selection, confirmation times, and throughput under heterogeneous staleness—would provide stronger quantitative guarantees. The "phase disruption" attack (§2.3) warrants game-theoretic analysis, though its practical feasibility is limited by network propagation jitter (50–200 ms).
+5. **Consensus-level staleness analysis.** §2.3 bounds staleness as 1.7–6.8% of propagation delay. A DAGKnight consensus simulation—modeling blue set selection, confirmation times, and throughput under heterogeneous staleness—would provide stronger quantitative guarantees. The "phase disruption" attack (§2.3) warrants game-theoretic analysis, though its practical feasibility is limited by network propagation jitter (50–200 ms).
 
 **Resolved.** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) are resolved under the PRP assumption.
 
