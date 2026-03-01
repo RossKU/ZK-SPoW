@@ -10,7 +10,7 @@ February 2026 — Version 2.0 (Draft)
 
 Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost. Ball et al. [1], Ofelimos [7], and Komargodski et al. [8, 9] demonstrate provably secure PoUW constructions, but deployment in high-throughput blockchains remains challenging due to pre-hashing, SNARGs, or domain-specific verification requirements. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
 
-**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured), <1 ms on ASIC (projected)).
+**ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured)).
 
 We do not claim protocol-level enforcement of useful work. Each Poseidon2 evaluation in STARK Merkle hashing simultaneously produces a Merkle parent (ZK output) and PoW tickets (checked against the difficulty target)—a mathematical byproduct, not a protocol mandate. Useful computation occurs when external proof demand exists. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 98\%$ (HBM3E, compute-saturated), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.5). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7.2). Projected zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
 
@@ -91,7 +91,7 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 ### 1.5 Contributions
 
-1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem 1, §2). Header staleness is bounded to one Merkle commitment phase (~3 ms GPU, 0.05 ms ASIC).
+1. **Memoryless PoW from non-memoryless computation.** We formalize *computational* progress-freedom for PoW schemes embedded in stateful computations and prove that ZK-SPoW achieves it under the PRP assumption on Poseidon2 (Theorem 1, §2). Header staleness is bounded to one Merkle commitment phase (~3 ms GPU (measured)).
 
 2. **Width-24 Poseidon2 in compression function mode.** We specify Width-24 Poseidon2 over M31 (1 permutation per Merkle hash, vs 2 in sponge mode) with $R_p = 22$ internal rounds for 128-bit security (§6.2). The 24-element output naturally partitions into a Merkle parent (advancing the ZK proof) and two additional PoW tickets—the dual-purpose output that makes ZK-SPoW possible (§4.2–§4.3).
 
@@ -125,9 +125,9 @@ The full proof (real–ideal reduction) and details on input distinctness, struc
 
 In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment phase. Traditional PoW has zero staleness (each hash references the latest header); ZK-SPoW introduces staleness $\Delta_{stale} \leq N_{max}/R_{perm}$, where $N_{max}$ is the largest Merkle tree size.
 
-**Concrete bounds:** GPU (measured): $\Delta_{stale} \approx 3.4$ ms at $\ell = 20$, 305 Mperm/s. ASIC (projected): $\Delta_{stale} \approx 0.05$ ms at 21 Gperm/s.
+**Concrete bound (GPU, measured):** $\Delta_{stale} \approx 3.4$ ms at $\ell = 20$, 305 Mperm/s.
 
-**Impact on BlockDAG consensus.** At 100 BPS, global propagation delays (50–200 ms) produce baseline anticone sizes of 10–40 blocks. In a BlockDAG [5], parallel blocks are all included—larger anticones do not compromise security, but increase confirmation time proportionally. Simulation ($10 \times 60$ s runs, Poisson arrivals, log-normal delays; source: `analysis/dagknight_staleness_sim.py`) shows GPU staleness adds a constant +0.68 blocks to the anticone—a **1.7–6.8% marginal increase** on global networks, with a proportional confirmation time cost. ASIC staleness (+0.01 blocks) is unmeasurable.
+**Impact on BlockDAG consensus.** At 100 BPS, global propagation delays (50–200 ms) produce baseline anticone sizes of 10–40 blocks. In a BlockDAG [5], parallel blocks are all included—larger anticones do not compromise security, but increase confirmation time proportionally. Simulation ($10 \times 60$ s runs, Poisson arrivals, log-normal delays; source: `analysis/dagknight_staleness_sim.py`) shows GPU staleness adds a constant +0.68 blocks to the anticone—a **1.7–6.8% marginal increase** on global networks, with a proportional confirmation time cost.
 
 | Network delay | Baseline anticone | With GPU (3.4 ms) | Marginal increase |
 |---|---|---|---|
@@ -137,7 +137,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 
 **Selfish mining.** An attacker announcing blocks at phase boundaries can waste victims' partial STARK computation, but gains no PoW advantage—stale tickets remain valid. The cost is at most one phase of ZK throughput (~3.4 ms × $f_{sym}$), not PoW security. Precision timing is impractical over 50–200 ms network jitter.
 
-**Trace size tradeoff.** Larger traces increase $\Delta_{stale}$: at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms (GPU), exceeding one block interval. On ASIC, even $\ell = 22$ yields 0.2 ms. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval.
+**Trace size tradeoff.** Larger traces increase $\Delta_{stale}$: at $\ell = 22$, $\Delta_{stale} \approx 13.6$ ms (GPU), exceeding one block interval. The protocol should constrain $\ell$ such that $N_{max}/R_{perm}$ remains below the block interval.
 
 ---
 
@@ -619,7 +619,7 @@ Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW s
 | PoW granularity | 1 hash = 1 trial | 1 proof = 1 ticket | Proof → hash | **1 perm = 1 trial** |
 | Trial duration | Nanoseconds | Tens of ms–s | Seconds + μs | **Nanoseconds** |
 | Progress-free? | **Yes** (info-theoretic) | **No** — sunk cost | Final hash: yes; proof: no | **Yes** (computational, PRP) |
-| Max staleness | 0 (stateless) | Proof duration | Proof duration | **~3 ms GPU / 0.05 ms ASIC** |
+| Max staleness | 0 (stateless) | Proof duration | Proof duration | **~3 ms (GPU, measured)** |
 | Losing miners' work | Security only | Proofs discarded | Proofs discarded | **ZK work preserved** |
 | $U$ (per-perm) | 0% | $\sim 1/N$ | $\sim 1/N$ | **100%** ($U_{sys}$: $f_{sym}$-limited, §5.5) |
 
@@ -637,7 +637,7 @@ ZK-SPoW operates at the finest possible granularity—individual permutations (n
 
 4. **ZK demand viability.** §7.2 derives the equilibrium condition and demand scarcity risk. The critical open question is whether sustained ZK proof demand at the required scale ($\gtrsim 10^5$ proofs/s network-wide) will materialize. A dynamic simulation of ZK-SPoW vs Pure PoW ASIC competition under stochastic ZK demand—including miner entry/exit dynamics and difficulty adjustment feedback—would quantify the collapse threshold more precisely. The source of demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
 
-5. **Full DAGKnight consensus simulation.** §2.3 simulates anticone size impact (1.7–6.8% marginal increase for GPU, unmeasurable for ASIC). A full DAGKnight consensus simulation—modeling blue set selection, confirmation times, and throughput under heterogeneous staleness—would provide stronger quantitative guarantees. The "phase disruption" attack (§2.3) warrants game-theoretic analysis, though its practical feasibility is limited by network propagation jitter (50–200 ms).
+5. **Full DAGKnight consensus simulation.** §2.3 simulates anticone size impact (1.7–6.8% marginal increase for GPU). A full DAGKnight consensus simulation—modeling blue set selection, confirmation times, and throughput under heterogeneous staleness—would provide stronger quantitative guarantees. The "phase disruption" attack (§2.3) warrants game-theoretic analysis, though its practical feasibility is limited by network propagation jitter (50–200 ms).
 
 **Resolved.** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) are resolved under the PRP assumption.
 
