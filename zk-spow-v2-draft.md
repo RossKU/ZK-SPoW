@@ -664,12 +664,12 @@ $$f_{sym} = \min\!\left(1 - \epsilon,\; \frac{(BW - BW_{ntt})/96}{R_{perm}}\righ
 
 where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, and pipeline drain.
 
-| Memory | Bandwidth | $BW - BW_{ntt}$ | $R_{merkle}$ | $f_{sym}$ | Proofs/sec |
-|---|---|---|---|---|---|
-| SRAM 32 MB | 200 GB/s | 180 GB/s | 1.88G | **~9%** | ~250 |
-| SRAM 64 MB | 400 GB/s | 380 GB/s | 3.96G | **~19%** | ~520 |
-| HBM3 8 GB | 1.2 TB/s | 1.18 TB/s | 12.3G | **~59%** | ~1,600 |
-| HBM3E 16 GB | 2.4 TB/s | 2.38 TB/s | 21G† | **~98%** | ~2,570 |
+| Memory | Bandwidth | $BW - BW_{ntt}$ | $R_{merkle}$ | $f_{sym}$ |
+|---|---|---|---|---|
+| SRAM 32 MB | 200 GB/s | 180 GB/s | 1.88G | **~9%** |
+| SRAM 64 MB | 400 GB/s | 380 GB/s | 3.96G | **~19%** |
+| HBM3 8 GB | 1.2 TB/s | 1.18 TB/s | 12.3G | **~59%** |
+| HBM3E 16 GB | 2.4 TB/s | 2.38 TB/s | 21G† | **~98%** |
 
 †Compute-saturated: $R_{merkle}$ capped at $R_{perm} = 21\text{G}$. The ~2% gap from 100% reflects proof transition overhead ($\epsilon$).
 
