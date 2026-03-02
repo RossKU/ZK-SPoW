@@ -331,7 +331,7 @@ The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p;
 
 Neither mechanism is mandatory for consensus. The current design treats mode distinguishability as optional: the PoW function is valid regardless of mode, and ZK revenue provides the economic incentive for Symbiotic mining. However, if future protocol evolution requires rewarding or mandating useful work, these mechanisms provide a path to verifiable mode identification without modifying the PoW function itself.
 
-**Header digest collision resistance.** The 248-bit header digest ($k = 8$ M31 elements) provides a birthday bound of $2^{124}$, comparable to the $2^{128}$ standard for 256-bit hashes. The single-ticket alternative (744-bit full state) would give $2^{372}$—far beyond necessity.
+**Header digest collision resistance.** The 248-bit header digest ($k = 8$ M31 elements) provides a birthday bound of $2^{124}$—a factor of $2^4$ below the $2^{128}$ standard for 256-bit hashes. If this 4-bit gap is deemed insufficient, the ticket readout can be changed to full-state comparison (744 bits, birthday bound $2^{372}$) without modifying the permutation.
 
 ---
 
