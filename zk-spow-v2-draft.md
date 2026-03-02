@@ -12,7 +12,7 @@ Proof-of-work (PoW) blockchains expend energy solely for network security. Proof
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured)).
 
-We do not claim protocol-level enforcement of useful work. Each Poseidon2 evaluation in STARK Merkle hashing simultaneously produces a Merkle parent (ZK output) and PoW tickets (checked against the difficulty target)—a mathematical byproduct, not a protocol mandate. Useful computation occurs when external proof demand exists. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 98\%$ (HBM3E, compute-saturated), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.4). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7.2). Projected zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
+We do not claim protocol-level enforcement of useful work. Each Poseidon2 evaluation in STARK Merkle hashing simultaneously produces a Merkle parent (ZK output) and PoW tickets (checked against the difficulty target)—a mathematical byproduct, not a protocol mandate. Useful computation occurs when external proof demand exists. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 98\%$ (HBM3E, compute-saturated), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.4). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7.2). Projected near-zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
 
 ---
 
@@ -71,7 +71,7 @@ $$U = \frac{\text{ZK-contributing trials}}{\text{total mining trials}}$$
 
 The per-permutation data overhead is 8/24 ≈ 33% (header digest occupying 8 of 24 state elements); this is the cost of PoW integration, not a usefulness loss.
 
-**System-level usefulness.** $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{sym}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{sys} = f_{sym} \times U$, ranging from ~10% (SRAM) to ~98% (HBM3E, compute-saturated) depending on memory configuration (§5.4, Appendix A). With pipelined proof generation, NTT and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention rather than phase sequencing.
+**System-level usefulness.** $U$ is a per-permutation metric. On ASIC, the Poseidon2 pipeline is compute-bound while STARK Merkle hashing is SRAM-bandwidth-limited, so only a fraction $f_{sym}$ of Poseidon2 cycles execute in Symbiotic mode. The system-level time-averaged usefulness is $U_{sys} = f_{sym} \times U$, projected to range from ~10% (SRAM) to ~98% (HBM3E, compute-saturated) depending on memory configuration (§5.4, Appendix A). With pipelined proof generation, NTT and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention rather than phase sequencing.
 
 ### 1.4 Our Solution: Permutation-Level PoW Extraction
 
@@ -317,7 +317,7 @@ Header {
 }
 ```
 
-The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block). At 100 BPS this adds 5.6 KB/s to network bandwidth—negligible relative to the ~12.5 MB/s block-body baseline (125 KB max body per KIP-13 × 100 BPS; total network traffic is higher due to headers and DAG parent references). The +56 bytes per header add <1 μs to block propagation delay at 1 Gbps, with no measurable impact on orphan rates.
+The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block). At 100 BPS this adds 5.6 KB/s to network bandwidth—negligible relative to the ~12.5 MB/s block-body baseline (125 KB max body per KIP-13 × 100 BPS; total network traffic is higher due to headers and DAG parent references). The +56 bytes per header add <1 μs to block propagation delay at 1 Gbps, with negligible expected impact on orphan rates.
 
 **Block hash vs PoW hash.** Block identity and PoW use separate hash functions. The block hash (e.g., Blake2b-256 for DAG references) is unchanged; only the PoW function is replaced.
 
@@ -386,7 +386,7 @@ Identical Poseidon2 pipeline, identical throughput. $U = 0\%$—no ZK proof is b
 |    SRAM data ready  -> STARK Merkle hash (Symbiotic)  |
 |    SRAM not ready   -> PoW nonce hash    (PoW)        |
 |                                                       |
-|  Switching cost: 0 throughput overhead (combinational MUX) |
+|  Switching cost: near-zero throughput overhead (combinational MUX) |
 |  Hashrate: invariant across all modes                 |
 +-------------------------------------------------------+
 ```
@@ -440,7 +440,7 @@ These are strictly weaker assumptions than sponge-mode indifferentiability—col
 
 **Round count is capacity-independent.** We verify from Plonky3's source [10] that the round number calculation depends on exactly four parameters: field prime $p$, state width $t$, S-box degree $d$, and security level $M$. Capacity does not appear. The six security constraints (statistical, interpolation, three Gröbner basis variants, and the algebraic bound from [15]) target the *permutation itself*—they bound the number of rounds needed to resist distinguishing attacks against $\pi$, not against a sponge construction built from $\pi$. Capacity $c$ is a separate, orthogonal parameter that determines sponge-mode security as $\min(\text{permutation security}, 2^{c/2})$. For compression function mode, only permutation security applies, and $R_p = 22$ (with margin $R_f += 2$, $R_p \times 1.075$) targets 128-bit permutation security directly.
 
-**Compression function mode risks.** While the round count is sound, operating without capacity has two consequences: (1) the full 744-bit state is visible, giving an attacker more information for algebraic cryptanalysis (e.g., CICO attacks [12] become formulated over the full state rather than a reduced output space); (2) there is no "safety net"—in sponge mode, even a partial permutation break may be absorbed by the capacity, whereas in compression mode any permutation weakness directly impacts security. We consider this acceptable because: (a) the 30-round configuration's algebraic properties (S-box degree growth, MDS diffusion) are mode-independent; (b) the Poseidon2 paper [3] explicitly recommends compression function mode for Merkle trees; (c) any attack on the compression function implies an attack on the sponge with equal or lower complexity (strictly more information available to the attacker).
+**Compression function mode risks.** While the round count is sound, operating without capacity has two consequences: (1) the full 744-bit state is visible, giving an attacker more information for algebraic cryptanalysis (e.g., CICO attacks [12] become formulated over the full state rather than a reduced output space); (2) there is no "safety net"—in sponge mode, even a partial permutation break may be absorbed by the capacity, whereas in compression mode any permutation weakness directly impacts security. We believe this risk is manageable because: (a) the 30-round configuration's algebraic properties (S-box degree growth, MDS diffusion) are mode-independent; (b) the Poseidon2 paper [3] explicitly recommends compression function mode for Merkle trees; (c) any attack on the compression function implies an attack on the sponge with equal or lower complexity (strictly more information available to the attacker).
 
 **Single primitive dependency.**
 
@@ -531,7 +531,7 @@ i.e., per-miner ZK revenue exceeds the ~10–20% mining revenue gap. Let $D$ be 
 
 $$\frac{D}{N_{spow}} \cdot F \geq (\alpha - 1) \cdot \frac{B}{N} \quad \Rightarrow \quad D_{min} = \frac{N_{spow} \cdot (\alpha - 1) \cdot B}{N \cdot F}$$
 
-**PoW security is unconditional.** Regardless of ZK demand, ZK-SPoW ASICs function as conventional PoW miners. When $Z \cdot F = 0$, the ASIC operates with a ~10–20% hash/watt disadvantage from unused die area. Difficulty adjustment absorbs this. **Network security is never compromised by insufficient ZK demand**; only the economic advantage of ZK-SPoW hardware is affected. The die area overhead is the cost of optionality—it purchases the ability to capture ZK revenue if the market emerges.
+**PoW security is unconditional.** Regardless of ZK demand, ZK-SPoW ASICs function as conventional PoW miners. When $Z \cdot F = 0$, the ASIC operates with a ~10–20% hash/watt disadvantage from unused die area. Difficulty adjustment absorbs this. **Network security is not structurally compromised by insufficient ZK demand**; only the economic advantage of ZK-SPoW hardware is affected. The die area overhead is the cost of optionality—it purchases the ability to capture ZK revenue if the market emerges.
 
 **Demand scarcity risk.** If $D < D_{min}$, per-miner ZK revenue falls below the mining revenue gap, and Pure PoW ASICs dominate economically. If $D \ll N_{spow} \cdot Z$, most ZK-SPoW cycles execute in Pure PoW mode ($U_{sys} \approx 0\%$), and rational miners may prefer cheaper Pure PoW hardware—an economic (not security) collapse scenario.
 
@@ -599,7 +599,7 @@ Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW s
 | Losing miners' work | Security only | Proofs discarded | Proofs discarded | **ZK work preserved** |
 | $U$ (per-perm) | 0% | $\sim 1/N$ | $\sim 1/N$ | **100%** ($U_{sys}$: $f_{sym}$-limited, §5.4) |
 
-ZK-SPoW operates at the finest possible granularity—individual permutations (nanoseconds)—achieving computational progress-freedom equivalent to the information-theoretic progress-freedom of traditional hash-based PoW (Theorem 1, §2.2). The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
+ZK-SPoW operates at the finest practical granularity—individual permutations (nanoseconds)—achieving computational progress-freedom analogous to the information-theoretic progress-freedom of traditional hash-based PoW (Theorem 1, §2.2). The cost: the PRP assumption on Poseidon2 replaces the random oracle assumption on traditional hash functions.
 
 ---
 
@@ -615,13 +615,13 @@ ZK-SPoW operates at the finest possible granularity—individual permutations (n
 
 5. **Consensus-level staleness analysis.** §2.3 bounds staleness as 1.7–6.8% of propagation delay. A DAGKnight consensus simulation—modeling blue set selection, confirmation times, and throughput under heterogeneous staleness—would provide stronger quantitative guarantees. The "phase disruption" attack (§2.3) warrants game-theoretic analysis, though its practical feasibility is limited by network propagation jitter (50–200 ms).
 
-**Resolved.** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) are resolved under the PRP assumption.
+**Conditionally resolved.** Triple-ticket independence (§6.4) and trace grinding resistance (§6.3) are addressed under the PRP assumption.
 
 ---
 
 ## 10. Conclusion
 
-ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with zero throughput switching overhead between modes.
+ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with near-zero throughput switching overhead between modes.
 
 The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.4), and depends entirely on external ZK proof demand (§7.2). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
 
@@ -646,7 +646,7 @@ Despite these limitations, ZK-SPoW demonstrates that useful computation and memo
 
 A fully pipelined Width-24 Poseidon2 core (30 rounds: 8 external + 22 internal) requires ~1.4M gates. On a 60M-gate die with 50% allocated to Poseidon2: **21 cores at ~1 Gperm/s each → 63G effective PoW hash/s** (3 tickets per permutation).
 
-M31 multipliers (~1K gates, 31×31 bit) are 3.5× smaller than Goldilocks (~3.5K gates, 64×64 bit), giving 3.5× more cores per die at equivalent area.
+M31 multipliers (~1K gates, 31×31 bit) are 3.5× smaller than Goldilocks (~3.5K gates, 64×64 bit), suggesting up to 3.5× more cores per die at equivalent area, before accounting for routing and control overhead.
 
 ### A.3 SRAM Bandwidth and $f_{sym}$
 
@@ -826,7 +826,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p = 0.006$.
 
-**Interpretation.** The difference is statistically significant ($p = 0.006$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to vanish.
+**Interpretation.** The difference is statistically significant ($p = 0.006$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to be substantially reduced.
 
 ---
 
