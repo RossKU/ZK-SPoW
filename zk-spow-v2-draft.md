@@ -493,7 +493,7 @@ No early-termination optimization exists: evaluating any ticket requires the ful
 - Grover's algorithm halves effective hash bits: 248/2 = 124-bit quantum security
 - Comparable to SHA-256 under quantum attack (256/2 = 128 bits)
 - kHeavyHash: 256/2 = 128-bit quantum security
-- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128). Both values remain above the 100-bit security floor considered acceptable for PoW.
+- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128). Both exceed the current NIST minimum of 112 bits (SP 800-131A Rev. 2) and BSI's 120-bit floor (TR-02102-1). The 4-bit shortfall relative to SHA-256 and the upcoming NIST 128-bit floor (SP 800-131A Rev. 3, 2030) is a known tradeoff of using the 248-bit M31 Poseidon2 output; if needed, full-state comparison (744-bit) provides ample margin.
 
 ---
 
