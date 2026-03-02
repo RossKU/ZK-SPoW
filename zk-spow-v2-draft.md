@@ -236,7 +236,7 @@ For Merkle tree commitments, each node hash requires two sponge absorptions (2 p
 | B: Width 20 | 20 | Compression | 1 | 1 |
 | **C: Width 24** | **24** | **Compression** | **1** | **1** |
 
-**Design A** requires no Stwo modification but costs 4 permutations per PoW draw (2 Merkle + 2 header binding). **Design B** provides only 4 M31 elements (124 bits) for header digest—below the 128-bit birthday bound target. **Design C (selected)** achieves symmetric 8+8+8 I/O with 1 permutation per Merkle hash and per PoW draw, 248-bit header digest (birthday bound $2^{124}$), and three PoW tickets per permutation. Width 24 is within the Poseidon2 paper's analyzed parameter range [3].
+**Design A** requires no Stwo modification but costs 4 permutations per PoW draw (2 Merkle + 2 header binding). **Design B** provides only 4 M31 elements (124 bits) for header digest—birthday bound $2^{62}$, insufficient for 128-bit security. **Design C (selected)** achieves symmetric 8+8+8 I/O with 1 permutation per Merkle hash and per PoW draw, 248-bit header digest (birthday bound $2^{124}$), and three PoW tickets per permutation. Width 24 is within the Poseidon2 paper's analyzed parameter range [3].
 
 **Proposed Extension (Design C):**
 ```
