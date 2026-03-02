@@ -317,7 +317,7 @@ Header {
 }
 ```
 
-The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block). At 100 BPS this adds 5.6 KB/s to network bandwidth—negligible relative to the ~12.5 MB/s baseline (125 KB/block × 100 BPS). The +56 bytes per header add <1 μs to block propagation delay at 1 Gbps, with no measurable impact on orphan rates.
+The only structural change is the nonce expansion from `u64` (8 bytes) to `[F_p; 16]` (64 bytes, +56 bytes per block). At 100 BPS this adds 5.6 KB/s to network bandwidth—negligible relative to the ~12.5 MB/s block-body baseline (125 KB max body per KIP-13 × 100 BPS; total network traffic is higher due to headers and DAG parent references). The +56 bytes per header add <1 μs to block propagation delay at 1 Gbps, with no measurable impact on orphan rates.
 
 **Block hash vs PoW hash.** Block identity and PoW use separate hash functions. The block hash (e.g., Blake2b-256 for DAG references) is unchanged; only the PoW function is replaced.
 
