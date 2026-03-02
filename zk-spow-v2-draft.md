@@ -422,7 +422,7 @@ $$f_{sym} = \min\!\left(1 - \epsilon,\; \frac{(BW - BW_{ntt})/96}{R_{perm}}\righ
 
 where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, and pipeline drain between proofs. See Appendix A.3 for concrete values.
 
-**Width-24 efficiency.** Compression function mode halves STARK's Poseidon2 cycle consumption versus sponge mode (§4.2), freeing more cycles for PoW.
+**Width-24 efficiency.** Compression function mode halves the permutation count per Merkle hash (2→1 vs sponge mode, §4.2), but each Width-24 permutation is larger (30 rounds vs 22). Net cycle reduction is ~32% (30 vs 44 rounds), not 50%.
 
 ---
 
