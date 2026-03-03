@@ -40,9 +40,9 @@ SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each ha
 
 Komargodski & Weinstein [8] provide the first non-trivial formalization of **Proof of Useful Work (PoUW)** and construct a protocol for arbitrary matrix multiplication with $1+o(1)$ multiplicative overhead, where miners select their own inputs (e.g., AI training workloads), building on the foundational study by Ball et al. [1]. Ofelimos [7] achieves provably secure PoUW for combinatorial optimization using SNARGs. Bar-On et al. [9] analyze equilibrium dynamics when miners receive external economic rewards for useful computation.
 
-These works operate in the direction **PoW → useful output**: the mining computation is designed so that its result is simultaneously useful. This requires problem-specific constructions, domain-specific verification, and novel security assumptions compatible with PoW's random exploration structure.
+These works operate in the direction **PoW → useful output**: the mining computation is designed so that its result is simultaneously useful. This direction faces a structural tension: useful computation is inherently stateful (sunk cost breaks memorylessness), requires domain-specific verification, and is limited to the problem class for which the protocol is constructed. [8] resolves the efficiency problem ($1+o(1)$ overhead) but memorylessness remains open—matrix multiplication is progressive, and the verifier must perform problem-specific checks (see §8.3 for detailed comparison).
 
-**ZK-SPoW takes a complementary direction.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a mathematical byproduct:
+**ZK-SPoW takes the reverse direction.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a mathematical byproduct. By operating at the granularity of a single Poseidon2 permutation (nanoseconds), each trial is independent with no sunk cost—memorylessness is preserved. Verification remains a standard `hash < target` check with no domain-specific logic:
 
 > **Conventional PoUW:** PoW computation → make results useful → deployment constraints [1, 7, 8, 9]
 >
@@ -50,7 +50,7 @@ These works operate in the direction **PoW → useful output**: the mining compu
 
 More precisely: each Poseidon2 Merkle hash in the STARK prover simultaneously computes a Merkle parent (advancing the ZK proof) and produces PoW tickets (checked against the difficulty target). This dual output is a mathematical consequence of reading the same permutation output for two purposes—not a hardware trick or a protocol mandate. The STARK does not *require* PoW, and the PoW does not *require* the STARK; they coexist because the permutation output serves both roles.
 
-This differs from the PoUW constructions in [1, 7, 8]: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The protocol does not enforce useful computation. However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—if the protocol chooses to verify it. See §8.3 for a detailed comparison.
+This differs from the PoUW constructions in [1, 7, 8]: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The protocol does not enforce useful computation—a tradeoff shared with [8], where usefulness also depends on external demand (§7, §8.3). However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—if the protocol chooses to verify it.
 
 **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
