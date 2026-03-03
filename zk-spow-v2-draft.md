@@ -540,7 +540,6 @@ Nockchain [11] is a Layer-1 blockchain using zkPoW, launched May 2025. Miners co
 | PoW hash | hash(ZK proof) < T | Poseidon2 output < T |
 | PoW generation | Two-step: ZK proof → external hash | **Single-step**: STARK Merkle hash = PoW hash |
 | Field / output | Goldilocks (64-bit), 320-bit Tip5 hash | M31 (31-bit), 248-bit output |
-| Hardware target | GPU | ASIC-optimized |
 | Useful work | ZK proof of deterministic puzzle | STARK Merkle hashing (tx verification) |
 | STARK enforcement | Mandatory (proof = block) | Market-driven |
 
