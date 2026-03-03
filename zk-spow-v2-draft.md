@@ -460,6 +460,16 @@ These are strictly weaker assumptions than sponge-mode indifferentiability—col
 
 **$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10]. The formula applies six security constraints from [2, 3] (statistical, interpolation, three Gröbner basis variants) plus the algebraic attack bound from [15], then adds margin: $R_f += 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraints are statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$) and Gröbner-2 ($R_{f,4} = 6$), tied. **Crucially, the formula depends only on $(p, t, d, M)$—capacity is not a parameter** (see §6.1). Total rounds: 30 (8 + 22). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$ ($5^{30} \approx 2^{69.7}$), far above the interpolation threshold of $2^{\min(M,\, n)} = 2^{31}$ for M31; the interpolation constraint is non-binding.
 
+**CICO complexity in compression mode.** A Constrained-Input Constrained-Output (CICO) attacker on the compression function seeks $x \in \mathbb{F}_p^{24}$ satisfying partial output constraints on $\pi(x)$. Modeling via intermediate S-box variables [2]: the 30-round permutation yields a polynomial system of $n \approx 238$ variables and 238 equations of degree $\leq 5$ ($24$ input unknowns $+ 8 \times 24$ full-round $+ 22$ partial-round S-box intermediates). Gröbner basis complexity is $\binom{n + d_{reg}}{d_{reg}}^{\omega}$, where $d_{reg}$ is the degree of regularity. Experimental estimates on Poseidon instances yield $d_{reg} \approx R_f/2 + R_p + 2 = 28$ for 30 rounds. With $n = 238$ and $\omega = 2$ (conservative):
+
+| $d_{reg}$ | Complexity |
+|---|---|
+| 28 (experimental estimate) | $\sim 2^{251}$ |
+| 14 (halved) | $\sim 2^{150}$ |
+| 12 | $\sim 2^{133}$ |
+
+Security drops below $2^{128}$ only if $d_{reg} \leq 11$—less than half the experimental estimate, requiring a structural breakthrough beyond known attacks. Full state visibility does not reduce $d_{reg}$: the degree of regularity is determined by the round structure (S-box degree growth and MDS mixing), and Width-24's larger state introduces more intermediate variables than narrower configurations, increasing Gröbner basis dimension. Note: $d_{reg} = 28$ is extrapolated from small-instance experiments; the exact value for Width-24 over M31 has not been computed (§9).
+
 **Recent cryptanalysis.** See §6.1 (Current margin) for detailed analysis of [12] and [13].
 
 ### 6.3 Trace Grinding Resistance
