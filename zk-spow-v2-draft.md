@@ -38,7 +38,7 @@ SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each ha
 
 ### 1.3 Prior PoUW Approaches and ZK-SPoW's Direction
 
-Komargodski & Weinstein [8] provide the first non-trivial formalization of **Proof of Useful Work (PoUW)** and construct a protocol for arbitrary matrix multiplication with $1+o(1)$ multiplicative overhead, where miners select their own inputs (e.g., AI training workloads). Ball et al. [1] introduced the PoUW concept earlier but withdrew usefulness claims after their definition was found trivially satisfiable; their construction also required poly-logarithmic prover overhead. Ofelimos [7] achieves provably secure PoUW for combinatorial optimization using SNARGs. Bar-On et al. [9] analyze equilibrium dynamics when miners receive external economic rewards for useful computation.
+Komargodski & Weinstein [8] provide the first non-trivial formalization of **Proof of Useful Work (PoUW)** and construct a protocol for arbitrary matrix multiplication with $1+o(1)$ multiplicative overhead, where miners select their own inputs (e.g., AI training workloads), building on the foundational study by Ball et al. [1]. Ofelimos [7] achieves provably secure PoUW for combinatorial optimization using SNARGs. Bar-On et al. [9] analyze equilibrium dynamics when miners receive external economic rewards for useful computation.
 
 These works operate in the direction **PoW → useful output**: the mining computation is designed so that its result is simultaneously useful. This requires problem-specific constructions, domain-specific verification, and novel security assumptions compatible with PoW's random exploration structure.
 
@@ -550,7 +550,7 @@ The key architectural difference: Nockchain computes the ZK proof first, then ha
 
 ### 8.3 Relationship to PoUW [1, 8]
 
-Komargodski & Weinstein [8] construct a PoUW protocol for arbitrary matrix multiplication with $1+o(1)$ overhead, where miners select their own inputs. Their formalization requires efficiency ($1+o(1)$ prover overhead), completeness, and hardness. Ball et al. [1] introduced the PoUW concept but withdrew usefulness claims after their definition was found trivially satisfiable. Both operate in the direction **PoW → useful output**. ZK-SPoW takes the reverse direction: **useful computation → PoW output**. Rather than redesigning PoW to produce useful results, useful ZK computation naturally produces PoW-valid outputs as a byproduct of the same permutation.
+Komargodski & Weinstein [8] construct a PoUW protocol for arbitrary matrix multiplication with $1+o(1)$ overhead, where miners select their own inputs. Their formalization requires efficiency ($1+o(1)$ prover overhead), completeness, and hardness—building on the foundational study by Ball et al. [1]. Both operate in the direction **PoW → useful output**. ZK-SPoW takes the reverse direction: **useful computation → PoW output**. Rather than redesigning PoW to produce useful results, useful ZK computation naturally produces PoW-valid outputs as a byproduct of the same permutation.
 
 | Criterion | PoW → useful [8] | Useful → PoW (ZK-SPoW) |
 |---|---|---|
