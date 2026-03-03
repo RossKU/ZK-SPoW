@@ -91,6 +91,8 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 3. **GPU empirical validation.** We implement a complete Width-24 Poseidon2 Circle STARK prover on GPU and validate: (a) STARK Merkle hashes produce PoW tickets as a byproduct (Appendix C.1); (b) no meaningful throughput difference between random nonce and structured Merkle inputs ($99.3\% \pm 0.3\%$; Appendix C.2).
 
+4. **Observable mode binding.** Although blocks do not contain STARK proofs, we introduce two independent mechanisms for distinguishing Symbiotic from Pure PoW blocks without consensus rule changes: (a) a nonce format convention providing header-only mode identification (zero-padded region is non-zero with probability $1 - 2^{-124}$ in Symbiotic mode); (b) mempool STARK proof correlation, where each proof's Merkle commitments contain the block's header digest $h_H$ as a salt, providing after-the-fact cryptographic evidence of Symbiotic mining (§4.4).
+
 ---
 
 ## 2. Progress-Freedom and Header Staleness
