@@ -8,7 +8,7 @@ February 2026 — Version 2.0 (Draft)
 
 ## Abstract
 
-Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) attempts to reclaim this cost. Ball et al. [1], Ofelimos [7], and Komargodski et al. [8, 9] demonstrate provably secure PoUW constructions, but deployment in high-throughput blockchains remains challenging due to pre-hashing, SNARGs, or domain-specific verification requirements. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
+Proof-of-work (PoW) blockchains expend energy solely for network security. Proof of Useful Work (PoUW) aims to reclaim this cost. Recent constructions achieve provable security for specific problem classes—matrix multiplication [8] and combinatorial optimization [7]—building on the foundational study by Ball et al. [1]. Bar-On et al. [9] analyze the game-theoretic equilibrium. These operate in the direction PoW → useful output, prioritizing protocol-enforced usefulness with domain-specific verification. ZK-based approaches [14]—using STARK proof generation as useful work—are a natural candidate, but face two issues: stateful, multi-phase STARK proving yields trial intervals of tens of milliseconds to seconds (non-memoryless); and losing miners' proofs are discarded, so effective usefulness under difficulty adjustment is no better than pure PoW.
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured)).
 
@@ -18,7 +18,7 @@ We do not claim protocol-level enforcement of useful work. Each Poseidon2 evalua
 
 ## 1. Introduction
 
-PoW blockchains waste energy on security-only computation (§1.1), yet replacing it with useful work requires preserving memoryless block discovery (§1.2)—a property fundamentally at odds with stateful computation. Prior PoUW approaches face deployment constraints in this direction (§1.3). ZK-SPoW inverts the relationship, extracting memoryless PoW from useful STARK computation at the permutation level (§1.4).
+PoW blockchains waste energy on security-only computation (§1.1), yet replacing it with useful work requires preserving memoryless block discovery (§1.2)—a property fundamentally at odds with stateful computation. Prior PoUW approaches make different design tradeoffs in this direction (§1.3). ZK-SPoW inverts the relationship, extracting memoryless PoW from useful STARK computation at the permutation level (§1.4).
 
 ### 1.1 The PoW Energy Problem
 
@@ -50,7 +50,7 @@ These works operate in the direction **PoW → useful output**: the mining compu
 
 More precisely: each Poseidon2 Merkle hash in the STARK prover simultaneously computes a Merkle parent (advancing the ZK proof) and produces PoW tickets (checked against the difficulty target). This dual output is a mathematical consequence of reading the same permutation output for two purposes—not a hardware trick or a protocol mandate. The STARK does not *require* PoW, and the PoW does not *require* the STARK; they coexist because the permutation output serves both roles.
 
-This differs from the PoUW constructions in [1, 7, 8]: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The protocol does not enforce useful computation—a tradeoff shared with [8], where usefulness also depends on external demand (§7, §8.3). However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—if the protocol chooses to verify it.
+This differs from the PoUW constructions in [1, 7, 8]: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The protocol does not enforce useful computation—usefulness depends on external ZK proof demand (§7). In [8], miners supply their own inputs; in ZK-SPoW, proof demand must come from the market (§8.3). However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—if the protocol chooses to verify it.
 
 **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
@@ -79,7 +79,7 @@ However, ZK-SPoW does not use proof completion as the PoW event. Instead, **each
 - The Merkle tree's feedback structure (parent outputs become child inputs at the next level) does not create exploitable correlation
 - Each PoW trial takes nanoseconds (one permutation), not tens of milliseconds to seconds (one proof)
 
-**Result:** ZK-SPoW is computationally progress-free (§2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption—satisfying the prerequisite that Nakamoto consensus security proofs require [5].
+**Result:** ZK-SPoW is computationally progress-free (§2.1) despite embedding PoW within a stateful computation. Block discovery is computationally indistinguishable from a Poisson process under the PRP assumption—satisfying the prerequisite that Nakamoto consensus security proofs require [5, 16].
 
 This addresses the challenge of combining useful computation with memoryless PoW—not by making the computation memoryless, but by extracting PoW at a granularity where the PRP assumption guarantees independence.
 
