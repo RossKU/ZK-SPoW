@@ -174,7 +174,7 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 | Internal rounds $R_p$ | 14 |
 | S-box exponent | $d = 5$ |
 | Merkle hash | 2 permutations per node (sponge: absorb left[8], absorb right[8]) |
-| Commitment hash | Blake2s (base layer), Poseidon2 (recursive proofs) |
+| Commitment hash | Blake2s (base layer), Poseidon over Felt252 (recursive proofs) |
 
 **Note:** All security claims in this paper assume final production round constants. As of writing, production round constants for Poseidon2 over M31 have not been finalized; the Stwo implementation uses development placeholders (`EXTERNAL_ROUND_CONSTS` and `INTERNAL_ROUND_CONSTS` uniformly set to `1234`).
 
@@ -188,8 +188,8 @@ In Symbiotic mode, the header digest $h_H$ is fixed for one Merkle commitment ph
 
 **Current (kHeavyHash [6]):**
 ```
-pre_pow_hash = Blake2b(H excluding nonce and timestamp)
-inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || nonce)
+pre_pow_hash = Blake2b(H with nonce=0, timestamp=0)
+inner        = cSHAKE256_PoW(pre_pow_hash || timestamp || [0u8;32] || nonce)
 pow_hash     = cSHAKE256_Heavy(M * inner XOR inner)
 valid iff pow_hash < target
 ```
@@ -249,7 +249,7 @@ Proposed ZK-SPoW: Width t  = 24,  Compression function (all 24 visible)
 | S-box operations | 142 | 214 | +51% |
 | State registers | 16 × 31 = 496 bits | 24 × 31 = 744 bits | +50% |
 
-Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (§6.3), adding +36% pipeline depth. Per-permutation data overhead: 8/24 ≈ 33% of state carries header digest rather than ZK data. ASIC area implications are analyzed in Appendix A.
+Width-24 requires $R_p = 22$ internal rounds vs Width-16's $R_p = 14$ (§6.2), adding +36% pipeline depth. Per-permutation data overhead: 8/24 ≈ 33% of state carries header digest rather than ZK data. ASIC area implications are analyzed in Appendix A.
 
 **Compression Function vs Sponge.**
 
@@ -289,7 +289,7 @@ OUTPUT (24 = 8+8+8, all visible):
 
 The same Poseidon2 hardware computes both modes. Only the input source for S[0..15] differs. **Note on full diffusion:** The Poseidon2 permutation mixes all 24 state elements through its MDS matrix every round. All output elements are functions of all input elements—the 8+8+8 labeling is a convention for reading the output, not a property of the permutation.
 
-**Note on ticket granularity: 3 tickets vs 1 ticket.** The 3 × 8-element partition is a protocol convention, not a cryptographic necessity. An alternative design reads all 24 output elements as a single value in $\mathbb{F}_p^{24}$ and adjusts the difficulty target accordingly ($q_{single} = T_{24}/p^{24}$ vs $q_{triple} = 1-(1-T_8/p^8)^3 \approx 3 T_8/p^8$). Both achieve equivalent expected block times via difficulty adjustment. We choose 3 × 248-bit tickets because: (1) **Stwo compatibility:** 8-element output matches the Stwo hash convention, enabling direct reuse of Merkle commitment infrastructure; (2) **Symbiotic mode constraint:** in Symbiotic mode, S[0..7] *must* be the Merkle parent (used by the STARK), so it has a designated role—the 3-ticket design naturally partitions the output into "STARK-functional" and "PoW-only" regions. A single-ticket design with 744-bit comparison is mathematically equivalent under PRP (Proposition 3, §6.4).
+**Note on ticket granularity: 3 tickets vs 1 ticket.** The 3 × 8-element partition is a protocol convention, not a cryptographic necessity. An alternative design reads all 24 output elements as a single value in $\mathbb{F}_p^{24}$ and adjusts the difficulty target accordingly ($q_{single} = T_{24}/p^{24}$ vs $q_{triple} = 1-(1-T_8/p^8)^3 \approx 3 T_8/p^8$). Both achieve equivalent expected block times via difficulty adjustment. We choose 3 × 248-bit tickets because: (1) **Stwo compatibility:** 8-element output matches the Stwo hash convention, enabling direct reuse of Merkle commitment infrastructure; (2) **Symbiotic mode constraint:** in Symbiotic mode, S[0..7] *must* be the Merkle parent (used by the STARK), so it has a designated role—the 3-ticket design naturally partitions the output into "STARK-functional" and "PoW-only" regions. A single-ticket design with 744-bit comparison achieves equivalent expected block times via difficulty adjustment; Proposition 3 (§6.4) confirms that the three tickets are computationally independent under PRP, validating the $q = 1-(1-p_t)^3$ formula.
 
 ### 4.4 Block Structure
 
