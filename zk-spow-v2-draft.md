@@ -602,7 +602,7 @@ ZK-SPoW operates at the finest practical granularity—individual permutations (
 
 ## 10. Conclusion
 
-ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with near-zero throughput switching overhead between modes.
+ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5, 16]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with near-zero throughput switching overhead between modes.
 
 Where prior PoUW constructions [1, 8] operate in the direction PoW → useful output—achieving protocol-enforced usefulness at the cost of stateful computation and domain-specific verification—ZK-SPoW reverses the direction: useful computation → PoW output. Operating at permutation granularity (nanoseconds) rather than proof granularity preserves memorylessness and standard PoW verification, but shifts usefulness from protocol-enforced to market-driven.
 
@@ -853,7 +853,7 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 [7] M. Fitzi, A. Kiayias, G. Panagiotakos, and A. Russell, "Ofelimos: Combinatorial Optimization via Proof-of-Useful-Work," Crypto 2022. https://eprint.iacr.org/2021/1379
 
-[8] I. Komargodski and O. Weinstein, "Proofs of Useful Work from Arbitrary Matrix Multiplication," IACR ePrint 2025/685, 2025. https://eprint.iacr.org/2025/685
+[8] I. Komargodski, I. Schen, and O. Weinstein, "Proofs of Useful Work from Arbitrary Matrix Multiplication," IACR ePrint 2025/685, 2025. https://eprint.iacr.org/2025/685
 
 [9] Y. Bar-On, I. Komargodski, and O. Weinstein, "Proof of Work With External Utilities," arXiv:2505.21685, 2025. https://arxiv.org/abs/2505.21685
 
