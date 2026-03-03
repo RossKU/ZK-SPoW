@@ -12,7 +12,7 @@ Proof-of-work (PoW) blockchains expend energy solely for network security. Proof
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW computation useful, useful ZK computation (STARK Merkle hashing) naturally produces PoW tickets as a computational byproduct. This inversion resolves the non-memoryless problem—under the pseudorandom permutation (PRP) assumption, each Poseidon2 permutation within the STARK is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity, rather than proof-level intervals of tens of milliseconds to seconds. It also eliminates proof waste: losing miners' ZK computation remains useful regardless of PoW outcome. Header staleness is bounded by one Merkle commitment phase (~3 ms on GPU (measured)).
 
-We do not claim protocol-level enforcement of useful work. Each Poseidon2 evaluation in STARK Merkle hashing simultaneously produces a Merkle parent (ZK output) and PoW tickets (checked against the difficulty target)—a mathematical byproduct, not a protocol mandate. Useful computation occurs when external proof demand exists. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 98\%$ (HBM3E, compute-saturated), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.4). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7.2). Projected near-zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
+We do not claim protocol-level enforcement of useful work. Each Poseidon2 evaluation in STARK Merkle hashing simultaneously produces a Merkle parent (ZK output) and PoW tickets (checked against the difficulty target)—a mathematical byproduct, not a protocol mandate. Useful computation occurs when external proof demand exists. We instantiate with Width-24 Poseidon2 over M31 ($p = 2^{31}-1$): three PoW tickets per permutation, per-permutation usefulness $U = 100\%$ during STARK proving. However, the system-level time-averaged usefulness $U_{sys} = f_{sym} \times U$ depends on SRAM bandwidth: $f_{sym} \approx 10\%$ (SRAM) to $\sim 98\%$ (HBM3E, compute-saturated), with remaining cycles filling Pure PoW at $U = 0\%$ (§5.4). When ZK proof demand is absent, $U_{sys} = 0\%$ and the ASIC operates as a conventional PoW miner (§7). Projected near-zero throughput switching overhead between modes. **Scope of claims:** All security claims (PRP assumption, progress-freedom, collision resistance) assume final Poseidon2 production round constants. GPU throughput measurements (Appendix C) are valid under any constants; they should not be interpreted as security validation. The current Stwo implementation uses placeholder values.
 
 ---
 
@@ -497,47 +497,27 @@ No early-termination optimization exists: evaluating any ticket requires the ful
 
 ---
 
-## 7. Pareto Analysis
+## 7. Economic Considerations
 
-### 7.1 Competing Designs
+A ZK-SPoW ASIC includes NTT units and memory infrastructure absent from a Pure PoW design. This die area overhead reduces hash/watt by a factor $\alpha > 1$ (the exact value depends on implementation; see Appendix A for one illustrative design). The economic question is whether ZK revenue compensates for this gap.
 
-Four designs compared under identical die area and power budget:
-
-| Design | Die allocation | Hashrate | ZK | $U$ | Mine? |
-|---|---|---|---|---|---|
-| Pure PoW | 95% Pos2, 5% ctrl | ~1.9 $\mathcal{H}$ | 0 | 0% | Yes |
-| Pure Stwo | 20% Pos2, 40% NTT, 35% SRAM | 0 | $Z_{max}$ | 100% | No |
-| **ZK-SPoW (SRAM)** | **50% Pos2, 25% NTT, 20% SRAM** | $\mathcal{H}$ | $Z$ | **$U_{sys}$~10%** | **Yes** |
-| ZK-SPoW (HBM3) | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | $U_{sys}$~60% | Yes |
-| ZK-SPoW (HBM3E) | 50% Pos2, 25% NTT, 20% HBM | $\mathcal{H}$ | $Z_{hbm}$ | $U_{sys}$~98% | Yes |
-
-Pure PoW achieves ~1.9× hashrate on a die-area basis but produces no ZK proofs ($U = 0\%$). On hashes-per-watt, the gap narrows to ~1.1–1.2× (idle NTT and SRAM contribute static leakage). Pure Stwo cannot mine. ZK-SPoW achieves $U = 100\%$ during STARK proving; the fraction of cycles in proving ($f_{sym}$) depends on memory bandwidth (~10% for 32 MB SRAM, ~60% for HBM3, ~98% for HBM3E; Appendix A.3). With pipelined proof generation, NTT and Merkle phases of different proofs overlap, and the constraint is memory bandwidth contention.
-
-### 7.2 Economic Dominance
-
-In a homogeneous network (all miners use the same ASIC type), difficulty adjusts so that per-miner mining revenue is $B/N$ regardless of absolute hashrate. In a heterogeneous network, mining revenue is proportional to hashrate share: a Pure PoW ASIC with ~1.1–1.2× hashes-per-watt advantage earns ~10–20% more mining revenue per watt than a ZK-SPoW ASIC.
-
-The differentiator is ZK revenue. Per-watt revenue comparison:
+**Revenue comparison.** Per-watt revenue:
 
 $$\text{ZK-SPoW} = \frac{\mathcal{H}_{spow}}{\mathcal{H}_{total}} \cdot B + Z \cdot F \quad \text{vs} \quad \text{Pure PoW} = \frac{\mathcal{H}_{pow}}{\mathcal{H}_{total}} \cdot B$$
 
-where $\mathcal{H}_{pow}/\mathcal{H}_{spow} \approx 1.1\text{–}1.2$ per watt. ZK-SPoW dominates when $Z \cdot F$ exceeds the ~10–20% mining revenue gap.
+ZK-SPoW dominates when $Z \cdot F$ exceeds the mining revenue gap from the $\alpha$ disadvantage.
 
-**Equilibrium condition.** Let $\alpha \approx 1.1\text{–}1.2$ be the Pure PoW hash/watt advantage. ZK-SPoW ASICs survive in equilibrium when:
+**Equilibrium condition.** Let $\alpha$ be the Pure PoW hash/watt advantage. ZK-SPoW ASICs survive in equilibrium when:
 
 $$Z \cdot F \geq (\alpha - 1) \cdot \frac{\mathcal{H}_{spow}}{\mathcal{H}_{total}} \cdot B$$
 
-i.e., per-miner ZK revenue exceeds the ~10–20% mining revenue gap. Let $D$ be the network-wide ZK proof demand (proofs/s) and $N_{spow}$ the number of ZK-SPoW miners, each with throughput $Z$. In steady state, per-miner ZK revenue is $F \cdot D / N_{spow}$ (demand shared equally). Substituting into the equilibrium condition:
+Let $D$ be the network-wide ZK proof demand (proofs/s) and $N_{spow}$ the number of ZK-SPoW miners. In steady state, per-miner ZK revenue is $F \cdot D / N_{spow}$. The minimum viable demand is:
 
-$$\frac{D}{N_{spow}} \cdot F \geq (\alpha - 1) \cdot \frac{B}{N} \quad \Rightarrow \quad D_{min} = \frac{N_{spow} \cdot (\alpha - 1) \cdot B}{N \cdot F}$$
+$$D_{min} = \frac{N_{spow} \cdot (\alpha - 1) \cdot B}{N \cdot F}$$
 
-**PoW security is unconditional.** Regardless of ZK demand, ZK-SPoW ASICs function as conventional PoW miners. When $Z \cdot F = 0$, the ASIC operates with a ~10–20% hash/watt disadvantage from unused die area. Difficulty adjustment absorbs this. **Network security is not structurally compromised by insufficient ZK demand**; only the economic advantage of ZK-SPoW hardware is affected. The die area overhead is the cost of optionality—it purchases the ability to capture ZK revenue if the market emerges.
+**PoW security is unconditional.** Regardless of ZK demand, ZK-SPoW ASICs function as conventional PoW miners with a hash/watt disadvantage. Difficulty adjustment absorbs this. **Network security is not structurally compromised by insufficient ZK demand**; only the economic advantage of ZK-SPoW hardware is affected.
 
-**Demand scarcity risk.** If $D < D_{min}$, per-miner ZK revenue falls below the mining revenue gap, and Pure PoW ASICs dominate economically. If $D \ll N_{spow} \cdot Z$, most ZK-SPoW cycles execute in Pure PoW mode ($U_{sys} \approx 0\%$), and rational miners may prefer cheaper Pure PoW hardware—an economic (not security) collapse scenario.
-
-**Order-of-magnitude estimate.** A Kaspa-scale network with $N_{spow} = 10{,}000$ ASICs at $Z = 260$ proofs/s (Appendix A) produces ~2.6M proofs/s of aggregate capacity. Current blockchain ZK demand (rollup proofs, zkVMs) is orders of magnitude below this.
-
-**Demand growth scenarios.** ZK-SPoW viability depends on future ZK proof demand scaling to match network capacity. Plausible demand sources include: (1) **zkRollup proving**: L2 rollups outsourcing STARK proof generation to L1 miners, creating a native demand channel; (2) **universal zkVM proving**: general-purpose verifiable computation as a service (e.g., zkWASM, Risc0), potentially generating sustained high-volume demand; (3) **cross-chain proof markets**: inter-chain state verification requiring STARK proofs at scale. Whether any of these materializes at $D \geq D_{min}$ is an open question (§9.4), not a protocol design issue.
+**Demand scarcity risk.** If $D < D_{min}$, Pure PoW ASICs dominate economically. If $D \ll N_{spow} \cdot Z$, most ZK-SPoW cycles execute in Pure PoW mode ($U_{sys} \approx 0\%$), and rational miners may prefer cheaper Pure PoW hardware—an economic (not security) collapse scenario. Whether sustained ZK proof demand at the required scale will materialize is an open question (§9).
 
 ---
 
@@ -623,7 +603,7 @@ ZK-SPoW operates at the finest practical granularity—individual permutations (
 
 ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with near-zero throughput switching overhead between modes.
 
-The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.4), and depends entirely on external ZK proof demand (§7.2). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
+The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.4), and depends entirely on external ZK proof demand (§7). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
 
 Despite these limitations, ZK-SPoW demonstrates that useful computation and memoryless PoW are not inherently incompatible at the hardware level—the tension identified in prior PoUW work can be sidestepped by operating at the permutation granularity rather than the proof granularity.
 
@@ -675,7 +655,7 @@ where $\epsilon \approx 0.02$ accounts for proof setup, FRI round transitions, a
 
 **SRAM pipelining constraint.** SRAM configurations (32–64 MB) may lack sufficient capacity to hold two proofs' data simultaneously (each proof requires ~4–8 MB for trace + extended evaluation). In this case, proof pipelining is limited, and the single-proof sequential model applies: $f_{sym}$ depends on both $R_{merkle}/R_{perm}$ and phase sequencing. The values above assume pipelining is feasible; for SRAM-only designs, $f_{sym}$ may be slightly lower (~8–17%). HBM configurations (8–16 GB) can hold hundreds of proofs and pipeline without constraint.
 
-**NoC area and power.** Delivering 200 GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7 nm, a 200 GB/s mesh NoC (e.g., ring or 2D mesh topology) consumes approximately 1–3% of die area and 0.5–1.5 W, depending on topology and wire length. The 5% Control & I/O budget (§A.1) is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7–10% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50% to ~47% (20 cores instead of 21). This is a ~5% hashrate reduction—non-negligible but does not qualitatively change the Pareto analysis (§7). The die allocation in §A.1 should be considered approximate; detailed physical design is beyond this paper's scope.
+**NoC area and power.** Delivering 200 GB/s of SRAM bandwidth to 21 Poseidon2 cores requires a Network-on-Chip (NoC) or crossbar interconnect. At 7 nm, a 200 GB/s mesh NoC (e.g., ring or 2D mesh topology) consumes approximately 1–3% of die area and 0.5–1.5 W, depending on topology and wire length. The 5% Control & I/O budget (§A.1) is tight: it must accommodate the NoC, PoW/STARK schedulers, difficulty comparison logic, and network interface. A more realistic breakdown may require 7–10% for Control, I/O, and interconnect, reducing Poseidon2 core allocation from 50% to ~47% (20 cores instead of 21). This is a ~5% hashrate reduction—non-negligible but does not qualitatively change the economic analysis (§7). The die allocation in §A.1 should be considered approximate; detailed physical design is beyond this paper's scope.
 
 ---
 
