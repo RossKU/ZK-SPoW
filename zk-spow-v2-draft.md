@@ -38,15 +38,9 @@ SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each ha
 
 ### 1.3 Prior PoUW Approaches and ZK-SPoW's Direction
 
-Ball et al. [1] formalize **Proof of Useful Work (PoUW)** as a PoW scheme where the mining computation simultaneously produces useful output. Their strict definition requires:
+Ball et al. [1] attempted to construct **Proof of Useful Work (PoUW)**—a PoW scheme where mining computation simultaneously produces useful output—but their approach incurred poly-logarithmic prover overhead and was subsequently retracted as failing the efficiency criterion. Ofelimos [7] achieves provably secure PoUW for combinatorial optimization using SNARGs for verification. Komargodski & Weinstein [8] construct a PoUW protocol for matrix multiplication with near-optimal overhead. Bar-On et al. [9] analyze the game-theoretic equilibrium when miners receive external economic rewards for useful computation.
 
-1. The PoW computation itself produces useful output
-2. The verifier can confirm the usefulness
-3. The useful output is bound to the PoW evidence
-
-Ofelimos [7] and Komargodski et al. [8, 9] demonstrate that provably secure PoUW constructions are achievable for specific problem classes (combinatorial optimization, matrix multiplication).
-
-These constructions operate in the direction **PoW → useful output**, and face deployment challenges in high-throughput blockchains: they require pre-hashing, SNARGs, or domain-specific verification, and the useful computation must be compatible with the PoW's random exploration structure.
+These works operate in the direction **PoW → useful output**, and face deployment challenges in high-throughput blockchains: they require SNARGs, domain-specific verification, or problem-specific constructions compatible with PoW's random exploration structure.
 
 **ZK-SPoW takes a complementary direction.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a mathematical byproduct:
 
@@ -56,7 +50,7 @@ These constructions operate in the direction **PoW → useful output**, and face
 
 More precisely: each Poseidon2 Merkle hash in the STARK prover simultaneously computes a Merkle parent (advancing the ZK proof) and produces PoW tickets (checked against the difficulty target). This dual output is a mathematical consequence of reading the same permutation output for two purposes—not a hardware trick or a protocol mandate. The STARK does not *require* PoW, and the PoW does not *require* the STARK; they coexist because the permutation output serves both roles.
 
-This differs from Ball et al.'s strict PoUW definition: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The protocol does not enforce useful computation. However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—if the protocol chooses to verify it. See §8.3 for a detailed comparison.
+This differs from the PoUW constructions in [1, 7, 8]: **blocks contain only the PoW hash, not the STARK proof** (§4.4). The protocol does not enforce useful computation. However, the operating mode *is* distinguishable—via nonce format conventions and mempool STARK proof correlation (§4.4)—if the protocol chooses to verify it. See §8.3 for a detailed comparison.
 
 **Definition (ZK-SPoW).** A PoW scheme where the hash function is a width-extended Poseidon2 compression function operating on STARK Merkle data, such that every permutation simultaneously advances a ZK proof and produces PoW tickets.
 
@@ -607,7 +601,7 @@ ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level wi
 
 The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.4), and depends entirely on external ZK proof demand (§7). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
 
-Despite these limitations, ZK-SPoW demonstrates that useful computation and memoryless PoW are not inherently incompatible at the hardware level—the tension identified in prior PoUW work can be sidestepped by operating at the permutation granularity rather than the proof granularity.
+Despite these limitations, ZK-SPoW demonstrates that useful computation and memoryless PoW are not inherently incompatible at the hardware level—the tension identified in prior PoUW work can be avoided by operating at the permutation granularity rather than the proof granularity.
 
 ---
 
