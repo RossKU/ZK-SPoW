@@ -552,18 +552,23 @@ The key architectural difference: Nockchain computes the ZK proof first, then ha
 
 Komargodski & Weinstein [8] construct a PoUW protocol for arbitrary matrix multiplication with $1+o(1)$ overhead, where miners select their own inputs. Their formalization requires efficiency ($1+o(1)$ prover overhead), completeness, and hardness—building on the foundational study by Ball et al. [1]. Both operate in the direction **PoW → useful output**. ZK-SPoW takes the reverse direction: **useful computation → PoW output**. Rather than redesigning PoW to produce useful results, useful ZK computation naturally produces PoW-valid outputs as a byproduct of the same permutation.
 
+**The PoW → useful tension.** The PoW → useful direction faces a structural difficulty: useful computation is inherently stateful (a miner partway through a matrix multiplication has sunk cost), requires domain-specific verification (the verifier must check the matrix result), and is limited to the specific problem class for which the protocol is constructed. PoW, by contrast, requires random memoryless exploration, lightweight verification, and problem-independence. [8] resolves the efficiency problem ($1+o(1)$ overhead) but memorylessness and verification generality remain open: matrix multiplication is progressive, and the verifier must perform problem-specific checks.
+
+ZK-SPoW avoids this tension by reversing the direction. Each Poseidon2 permutation is an independent, nanosecond-scale trial with no sunk cost—memorylessness is preserved because the PoW granularity is a single permutation, not an entire useful computation. Verification remains a simple `hash < target` check with no domain-specific logic.
+
 | Criterion | PoW → useful [8] | Useful → PoW (ZK-SPoW) |
 |---|---|---|
 | Useful output | **Yes**: each PoW trial produces a matrix multiplication result | **Yes**: every Symbiotic permutation advances a STARK proof |
 | Efficiency overhead | $1+o(1)$ multiplicative | Near-zero: same permutation serves both roles |
 | Usefulness enforced | **Protocol-enforced**: verifier checks matrix result | **Not enforced**: consensus checks only PoW hash; mode distinguishable but optional (§4.4) |
+| Verification | Domain-specific (matrix result check) | Standard PoW (`hash < target`) |
 | Input selection | Miner-selected (arbitrary matrices) | STARK-determined (miner cannot choose Merkle inputs) |
 | Memorylessness | Not addressed (matrix multiplication is stateful) | **Yes**: permutation-level, nanosecond granularity (§5.1) |
 | Security basis | Novel conjectures on matrix multiplication hardness | PRP assumption on Poseidon2 (§6) |
 
-**Mode distinguishability without enforcement.** Blocks do not contain STARK proofs, but the operating mode is *not* indistinguishable. Two mechanisms allow mode identification (§4.4): (1) a nonce format convention that makes Pure PoW blocks identifiable from the header alone, and (2) mempool STARK proofs whose Merkle commitments contain the block's `h_H` as a salt, providing after-the-fact cryptographic evidence of Symbiotic mining. The current design treats these as optional—consensus validity depends only on the PoW hash, and economic incentives (ZK proof revenue) drive Symbiotic adoption. However, these mechanisms mean the protocol *could* enforce or reward useful work in future iterations without modifying the PoW function.
+**Shared limitation: demand dependency.** Both approaches depend on external demand for the useful computation to materialize. [8] requires demand for matrix multiplication; ZK-SPoW requires demand for STARK proofs (§7). Without such demand, miners in [8] compute arbitrary matrices with no economic value, while ZK-SPoW miners fall back to Pure PoW mode. Neither protocol guarantees useful computation in the absence of a market.
 
-A miner *could* run Pure PoW mode exclusively, forgoing ZK revenue. The protocol does not enforce useful computation; the evidence infrastructure for mode verification exists (§4.4), but activation is a policy decision.
+**Mode distinguishability without enforcement.** Blocks do not contain STARK proofs, but the operating mode is *not* indistinguishable. Two mechanisms allow mode identification (§4.4): (1) a nonce format convention that makes Pure PoW blocks identifiable from the header alone, and (2) mempool STARK proofs whose Merkle commitments contain the block's `h_H` as a salt, providing after-the-fact cryptographic evidence of Symbiotic mining. The current design treats these as optional—consensus validity depends only on the PoW hash, and economic incentives (ZK proof revenue) drive Symbiotic adoption. However, these mechanisms mean the protocol *could* enforce or reward useful work in future iterations without modifying the PoW function.
 
 ### 8.4 Memorylessness Comparison
 
