@@ -38,9 +38,9 @@ SHA-256 (Bitcoin) and kHeavyHash (Kaspa) are memoryless by construction: each ha
 
 ### 1.3 Prior PoUW Approaches and ZK-SPoW's Direction
 
-Ball et al. [1] attempted to construct **Proof of Useful Work (PoUW)**—a PoW scheme where mining computation simultaneously produces useful output—but their approach incurred poly-logarithmic prover overhead and was subsequently retracted as failing the efficiency criterion. Ofelimos [7] achieves provably secure PoUW for combinatorial optimization using SNARGs for verification. Komargodski & Weinstein [8] construct a PoUW protocol for matrix multiplication with near-optimal overhead. Bar-On et al. [9] analyze the game-theoretic equilibrium when miners receive external economic rewards for useful computation.
+Komargodski & Weinstein [8] provide the first non-trivial formalization of **Proof of Useful Work (PoUW)** and construct a protocol for arbitrary matrix multiplication with $1+o(1)$ multiplicative overhead, where miners select their own inputs (e.g., AI training workloads). Ball et al. [1] introduced the PoUW concept earlier but withdrew usefulness claims after their definition was found trivially satisfiable; their construction also required poly-logarithmic prover overhead. Ofelimos [7] achieves provably secure PoUW for combinatorial optimization using SNARGs. Bar-On et al. [9] analyze equilibrium dynamics when miners receive external economic rewards for useful computation.
 
-These works operate in the direction **PoW → useful output**, and face deployment challenges in high-throughput blockchains: they require SNARGs, domain-specific verification, or problem-specific constructions compatible with PoW's random exploration structure.
+These works operate in the direction **PoW → useful output**: the mining computation is designed so that its result is simultaneously useful. This requires problem-specific constructions, domain-specific verification, and novel security assumptions compatible with PoW's random exploration structure.
 
 **ZK-SPoW takes a complementary direction.** Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a mathematical byproduct:
 
@@ -548,17 +548,18 @@ The key architectural difference: Nockchain computes the ZK proof first, then ha
 
 **Memorylessness nuance.** Nockchain's final hash-after-proof step is itself memoryless: the hash evaluation is independent of previous hashes. However, the proof computation phase preceding it is progressive (a miner closer to proof completion has higher conditional probability of reaching the hash step sooner). The overall block arrival process is therefore a *renewal process* where inter-arrival times are the sum of a progressive proof phase and a memoryless hash phase—not a pure Poisson process. The practical impact depends on proof duration relative to block interval: if proofs take seconds and blocks arrive every few seconds, the progressive component is significant. ZK-SPoW avoids this entirely by operating at permutation granularity (nanoseconds).
 
-### 8.3 Relationship to Ball et al.
+### 8.3 Relationship to PoUW [1, 8]
 
-Ball et al. [1] attempted to construct PoUW by making miners solve useful computational problems (Orthogonal Vectors, 3SUM, All-Pairs Shortest Paths) as PoW. Their scheme incurred poly-logarithmic prover overhead and was subsequently retracted as failing the efficiency criterion [Ball et al., 2018]. ZK-SPoW takes the reverse direction: **useful computation → PoW output**. Rather than redirecting PoW toward useful work, useful ZK computation naturally produces PoW-valid outputs as a byproduct of the same permutation.
+Komargodski & Weinstein [8] construct a PoUW protocol for arbitrary matrix multiplication with $1+o(1)$ overhead, where miners select their own inputs. Their formalization requires efficiency ($1+o(1)$ prover overhead), completeness, and hardness. Ball et al. [1] introduced the PoUW concept but withdrew usefulness claims after their definition was found trivially satisfiable. Both operate in the direction **PoW → useful output**. ZK-SPoW takes the reverse direction: **useful computation → PoW output**. Rather than redesigning PoW to produce useful results, useful ZK computation naturally produces PoW-valid outputs as a byproduct of the same permutation.
 
-The following comparison uses our own analytical framework (not Ball et al.'s formal definitions):
-
-| Criterion | PoW → useful (Ball et al.) | Useful → PoW (ZK-SPoW) |
+| Criterion | PoW → useful [8] | Useful → PoW (ZK-SPoW) |
 |---|---|---|
-| PoW produces useful output | Partial (efficiency not achieved) | **Yes**: every Symbiotic permutation advances a STARK proof |
-| Verifier confirms usefulness | Not enforced | **Distinguishable but not enforced**: mode identifiable via nonce format and mempool proof correlation (§4.4) |
-| Useful output bound to PoW | Not enforced | **Architectural**: same permutation produces both; STARK proof contains `h_H` binding evidence (§4.4) |
+| Useful output | **Yes**: each PoW trial produces a matrix multiplication result | **Yes**: every Symbiotic permutation advances a STARK proof |
+| Efficiency overhead | $1+o(1)$ multiplicative | Near-zero: same permutation serves both roles |
+| Usefulness enforced | **Protocol-enforced**: verifier checks matrix result | **Not enforced**: consensus checks only PoW hash; mode distinguishable but optional (§4.4) |
+| Input selection | Miner-selected (arbitrary matrices) | STARK-determined (miner cannot choose Merkle inputs) |
+| Memorylessness | Not addressed (matrix multiplication is stateful) | **Yes**: permutation-level, nanosecond granularity (§5.1) |
+| Security basis | Novel conjectures on matrix multiplication hardness | PRP assumption on Poseidon2 (§6) |
 
 **Mode distinguishability without enforcement.** Blocks do not contain STARK proofs, but the operating mode is *not* indistinguishable. Two mechanisms allow mode identification (§4.4): (1) a nonce format convention that makes Pure PoW blocks identifiable from the header alone, and (2) mempool STARK proofs whose Merkle commitments contain the block's `h_H` as a salt, providing after-the-fact cryptographic evidence of Symbiotic mining. The current design treats these as optional—consensus validity depends only on the PoW hash, and economic incentives (ZK proof revenue) drive Symbiotic adoption. However, these mechanisms mean the protocol *could* enforce or reward useful work in future iterations without modifying the PoW function.
 
