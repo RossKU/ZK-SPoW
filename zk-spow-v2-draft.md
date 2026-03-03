@@ -446,7 +446,7 @@ These are strictly weaker assumptions than sponge-mode indifferentiability—col
 
 **Correlated failure mode.** A cryptographic break in Poseidon2 compromises both PoW security and STARK validity simultaneously—a qualitatively different risk profile from traditional designs where PoW and STARK use independent primitives. We assess this risk quantitatively:
 
-- **Current margin.** The 30-round configuration ($R_f = 8$, $R_p = 22$) includes a $+2$ external round margin and $\times 1.075$ internal round margin over the minimum required by known attacks. Merz and Rodríguez García [12] improve algebraic CICO attacks by $2^{106}$ for one parameter set but conclude the full-round primitive "does not fall short of its claimed security level." Resultant-based attacks [13] solve instances with $\leq 10$ total rounds—far below the 30-round configuration.
+- **Current margin.** The 30-round configuration ($R_f = 8$, $R_p = 22$) includes a $+2$ external round margin and $\times 1.075$ internal round margin over the minimum required by known attacks. Merz and Rodríguez García [12] improve algebraic collision attacks by $2^{106}$ for one parameter set but conclude the full-round primitive "does not fall short of its claimed security level." Resultant-based attacks [13] solve instances with $\leq 10$ total rounds—far below the 30-round configuration.
 - **Margin erosion trajectory.** The attack improvement of [12] targets the sparse structure of $M_I$, a design feature inherent to Poseidon2. Further advances along this line are plausible. If a future attack reduces security below $2^{128}$ for Width-24/30-round, both PoW and STARK would require parameter updates simultaneously.
 - **Fallback strategy.** A Poseidon2 break does not require abandoning ZK-SPoW. The framework is parametric: increasing $R_p$ (more internal rounds) restores security at the cost of throughput and die area. In the extreme case, the chain can revert to Pure PoW mode with a different hash function while maintaining block production—Symbiotic mode is an overlay, not a prerequisite for consensus. A hard fork would be required in either case (as it would for any PoW hash function break).
 
@@ -458,7 +458,7 @@ These are strictly weaker assumptions than sponge-mode indifferentiability—col
 
 **PoW security.** Under the PRP assumption, finding an input whose output satisfies ticket $< T$ requires expected $1/p_t$ evaluations—no better strategy than random trials exists. No known algebraic attack on the 30-round permutation (8 external + 22 internal) provides a shortcut.
 
-**$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10]. The formula applies six security constraints from [2, 3] (statistical, interpolation, three Gröbner basis variants) plus the algebraic attack bound from [15], then adds margin: $R_f += 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraints are statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$) and Gröbner-2 ($R_{f,4} = 6$), tied. **Crucially, the formula depends only on $(p, t, d, M)$—capacity is not a parameter** (see §6.1). Total rounds: 30 (8 + 22). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$ ($5^{30} \approx 2^{69.7}$), far above the interpolation threshold of $\sim 2^{36}$ for M31 ($\min(M, n) = \min(128, 31) = 31$); the interpolation constraint is non-binding.
+**$R_p$ for Width-24.** $R_p = 22$ for 128-bit security at $d = 5$ over M31, computed via Plonky3's round number formula [10]. The formula applies six security constraints from [2, 3] (statistical, interpolation, three Gröbner basis variants) plus the algebraic attack bound from [15], then adds margin: $R_f += 2$, $R_p \times 1.075$. Pre-margin optimum: $(R_f, R_p) = (6, 20)$; post-margin: $(8, 22)$. The binding constraints are statistical ($R_{f,1} = 6$, since $M = 128 \leq \lfloor \log_2 p - 2 \rfloor \times (t+1) = 700$) and Gröbner-2 ($R_{f,4} = 6$), tied. **Crucially, the formula depends only on $(p, t, d, M)$—capacity is not a parameter** (see §6.1). Total rounds: 30 (8 + 22). S-box operations: $t \times R_f + R_p = 24 \times 8 + 22 = 214$ per permutation; in compression function mode (§4.2), this yields 25% fewer S-boxes per Merkle hash than Width-16 sponge (214 vs $2 \times 142 = 284$). Supplementary: $M_I^k$ is invertible for $k = 1..48$ (subspace trail resistance). Algebraic degree after 30 rounds exceeds $2^{69}$ ($5^{30} \approx 2^{69.7}$), far above the interpolation threshold of $2^{\min(M,\, n)} = 2^{31}$ for M31; the interpolation constraint is non-binding.
 
 **Recent cryptanalysis.** See §6.1 (Current margin) for detailed analysis of [12] and [13].
 
@@ -487,7 +487,7 @@ No early-termination optimization exists: evaluating any ticket requires the ful
 - Grover's algorithm halves effective hash bits: 248/2 = 124-bit quantum security
 - Comparable to SHA-256 under quantum attack (256/2 = 128 bits)
 - kHeavyHash: 256/2 = 128-bit quantum security
-- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128). Both exceed the current NIST minimum of 112 bits (SP 800-131A Rev. 2) and BSI's 120-bit floor (TR-02102-1). The 4-bit shortfall relative to SHA-256 and the upcoming NIST 128-bit floor (SP 800-131A Rev. 3, 2030) is a known tradeoff of using the 248-bit M31 Poseidon2 output; if needed, full-state comparison (744-bit) provides ample margin.
+- **Delta:** −8 bits classical (248 vs 256) / −4 bits quantum (124 vs 128). Both exceed the current NIST minimum of 112 bits (SP 800-131A Rev. 2) and BSI's 120-bit floor (TR-02102-1). The 4-bit shortfall relative to SHA-256 and the proposed NIST 128-bit floor (SP 800-131A Rev. 3 draft, 2030) is a known tradeoff of using the 248-bit M31 Poseidon2 output; if needed, full-state comparison (744-bit) provides ample margin.
 
 ---
 
@@ -748,7 +748,7 @@ $$P(C < T) = p_t$$
 $$P(A < T \wedge B < T \wedge C < T) = p_t^3$$
 $$P(A < T \vee B < T \vee C < T) = 1 - (1-p_t)^3 = 3p_t - 3p_t^2 + p_t^3$$
 
-The quantity $q = 1 - (1-p_t)^3$ used in §6.5 and Appendix B.2–B.5 is exact under PRP, not an approximation. ∎
+The quantity $q = 1 - (1-p_t)^3$ used in §6.4 and Appendix B.2–B.5 is exact under PRP, not an approximation. ∎
 
 ---
 
@@ -807,7 +807,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p < 0.001$ ($p \approx 2.5 \times 10^{-5}$, $df = 9$).
 
-**Interpretation.** The difference is statistically significant ($p = 0.006$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to be substantially reduced.
+**Interpretation.** The difference is statistically significant ($p < 0.001$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to be substantially reduced.
 
 ---
 
