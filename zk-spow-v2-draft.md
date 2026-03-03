@@ -600,7 +600,7 @@ ZK-SPoW operates at the finest practical granularity—individual permutations (
 
 2. **Memoryless validation.** Empirical verification of Poisson block inter-arrival times in a test network running ZK-SPoW would complement the theoretical analysis of §2.
 
-3. **Output quality under production constants.** The GPU experiments (Appendix C) use placeholder round constants. Statistical testing of output pseudorandomness (e.g., NIST SP 800-22) under production Poseidon2 constants would validate that the PRP assumption holds in practice, not only in theory.
+3. **Output quality under production constants.** Appendix C.3 reports NIST SP 800-22 results under the reference implementation's round constants (SplitMix64-derived): all 15 tests pass at the $\geq 97/100$ threshold, and inter-ticket independence holds across all three correlation measures. Testing under finalized production Poseidon2 constants would complete validation.
 
 4. **ZK demand viability.** §7 derives the equilibrium condition and demand scarcity risk. The critical open question is whether sustained ZK proof demand at sufficient scale will materialize. A dynamic simulation of ZK-SPoW vs Pure PoW ASIC competition under stochastic ZK demand—including miner entry/exit dynamics and difficulty adjustment feedback—would quantify the collapse threshold more precisely. The source of demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
 
@@ -818,6 +818,40 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p < 0.001$ ($p \approx 2.5 \times 10^{-5}$, $df = 9$).
 
 **Interpretation.** The difference is statistically significant ($p < 0.001$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to be substantially reduced.
+
+### C.3 Output Pseudorandomness
+
+**Claim.** Poseidon2 Width-24 output is statistically indistinguishable from random under sequential counter inputs, supporting the PRP assumption (Theorem 1).
+
+**Method.** 100 sequences × 1,000,000 bits each. Input: $(counter, 0, \ldots, 0) \in \mathbb{F}_p^{24}$, sequential counters. Each permutation yields $24 \times 31 = 744$ output bits. Round constants: SplitMix64-derived (seed `0x5A4B3C2D1E0FA9B8`). Poseidon2 implementation ported line-by-line from the reference Rust miner. Pass criterion: $\geq 97/100$ sequences pass at $\alpha = 0.01$ (NIST SP 800-22 §4.2: $\hat{p} - 3\sqrt{\hat{p}(1-\hat{p})/n} \approx 0.96$).
+
+| NIST SP 800-22 Test | Pass | Rate |
+|---|---|---|
+| Frequency (Monobit) | 99/100 | 99.0% |
+| Block Frequency | 100/100 | 100.0% |
+| Runs | 97/100 | 97.0% |
+| Longest Run of Ones | 99/100 | 99.0% |
+| Serial ($m = 16$) | 98/100 | 98.0% |
+| Approximate Entropy ($m = 10$) | 98/100 | 98.0% |
+| Cumulative Sums | 99/100 | 99.0% |
+| Binary Matrix Rank | 98/100 | 98.0% |
+| Non-overlapping Template ($m = 9$) | 100/100 | 100.0% |
+| Overlapping Template ($m = 9$) | 99/100 | 99.0% |
+| DFT (Spectral) | 99/100 | 99.0% |
+| Linear Complexity ($M = 500$) | 99/100 | 99.0% |
+| Maurer Universal ($L = 7$) | 98/100 | 98.0% |
+| Random Excursions (Šidák-corrected) | 55/56 | 98.2% |
+| Random Excursions Variant (Šidák-corrected) | 55/56 | 98.2% |
+
+All 15 tests pass at the $\geq 97/100$ threshold ($\geq 96\%$ for Random Excursions with 56 applicable sequences). Random Excursions tests apply Šidák correction for multi-state aggregation (8 and 18 states respectively). Linear Complexity uses corrected theoretical probabilities (the NIST STS 2.1.2 reference implementation contains a known bug where $\pi_6 = 1/32$ instead of $1/48$, causing $\sum \pi_i > 1$).
+
+**Inter-ticket independence.** Three tickets per permutation (S[0..7], S[8..15], S[16..23]) were tested for cross-ticket correlation over 100,000 permutations:
+
+- **XOR Monobit**: $\text{T}_0 \oplus \text{T}_1$: $p = 0.89$; $\text{T}_0 \oplus \text{T}_2$: $p = 0.45$; $\text{T}_1 \oplus \text{T}_2$: $p = 0.33$. All pass ($p > 0.01$).
+- **Pearson correlation**: 192 cross-ticket element pairs, mean $|r| = 0.0024$, max $|r| = 0.0079$ (expected max for random: $\sim 0.010$).
+- **Joint success** ($d = 5$, $P_\text{single} \approx 1/32$): Observed joint rates match independent expectation ($\chi^2$ $p = 0.97, 0.33, 0.40$ for pairs $(0,1), (0,2), (1,2)$).
+
+**Caveat.** Tested with SplitMix64-derived round constants (the reference implementation's constants). Testing under finalized production Poseidon2 constants would complete validation. Reproducible via `analysis/nist_sp800_22_poseidon2.py` (stdlib-only Python).
 
 ---
 
