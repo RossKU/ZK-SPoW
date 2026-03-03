@@ -533,9 +533,9 @@ Granularity comparison:
 - **Proof-level**: 1 trial per tens of ms–seconds → non-memoryless, losing proofs wasted
 - **Permutation-level (ZK-SPoW)**: 1 trial per nanoseconds → PRP-memoryless, ZK work survives PoW failure
 
-**Ofelimos [7].** Uses SNARK proofs as useful work in a provably secure PoUW framework. The useful computation is protocol-mandated (combinatorial optimization), not market-driven. Like ZK-SPoW, Ofelimos addresses the PoUW challenge formally, but operates in the "PoW → useful" direction with domain-specific verification.
+**Ofelimos [7].** Performs combinatorial optimization (Doubly Parallel Local Search) as useful work in a provably secure PoUW framework, using SNARGs for efficient verification. The useful computation is protocol-mandated, not market-driven. Like ZK-SPoW, Ofelimos addresses the PoUW challenge formally, but operates in the "PoW → useful" direction with domain-specific verification.
 
-**Komargodski et al. [8, 9].** Explore PoUW via matrix multiplication and external utility functions. ZK-SPoW differs: (1) useful computation is market-driven rather than protocol-mandated, and (2) PoW tickets emerge as a byproduct of STARK hashing rather than through separate verification.
+**Komargodski & Weinstein [8].** Construct a PoUW protocol for arbitrary matrix multiplication with near-optimal overhead, enabling miners to repurpose GPU computation (e.g., AI training) for consensus. **Bar-On, Komargodski & Weinstein [9].** Analyze equilibrium dynamics when miners receive external economic rewards for useful computation alongside mining revenue. ZK-SPoW differs from [8] in that PoW tickets emerge as a byproduct of STARK hashing rather than through a separate verification protocol, and from [9] in that ZK revenue is a design-level property rather than an external market assumption.
 
 ### 8.2 Sequential ZK-then-Hash (Nockchain)
 
@@ -545,7 +545,7 @@ Nockchain [11] is a Layer-1 blockchain using zkPoW, launched May 2025. Miners co
 |---|---|---|
 | PoW hash | hash(ZK proof) < T | Poseidon2 output < T |
 | PoW generation | Two-step: ZK proof → external hash | **Single-step**: STARK Merkle hash = PoW hash |
-| Field / output | Goldilocks (64-bit), 256-bit hash | M31 (31-bit), 248-bit output |
+| Field / output | Goldilocks (64-bit), 320-bit Tip5 hash | M31 (31-bit), 248-bit output |
 | Hardware target | GPU | ASIC-optimized |
 | Useful work | ZK proof of deterministic puzzle | STARK Merkle hashing (tx verification) |
 | STARK enforcement | Mandatory (proof = block) | Market-driven |
@@ -556,17 +556,19 @@ The key architectural difference: Nockchain computes the ZK proof first, then ha
 
 ### 8.3 Relationship to Ball et al.
 
-Ball et al. [1] formalize PoUW in the direction **PoW → useful output**. ZK-SPoW operates inversely: **useful computation → PoW output**.
+Ball et al. [1] attempted to construct PoUW by making miners solve useful computational problems (Orthogonal Vectors, 3SUM, All-Pairs Shortest Paths) as PoW. Their scheme incurred poly-logarithmic prover overhead and was subsequently retracted as failing the efficiency criterion [Ball et al., 2018]. ZK-SPoW takes the reverse direction: **useful computation → PoW output**. Rather than redirecting PoW toward useful work, useful ZK computation naturally produces PoW-valid outputs as a byproduct of the same permutation.
 
-| Ball et al. criterion | PoW → useful (their framework) | Useful → PoW (ZK-SPoW) |
+The following comparison uses our own analytical framework (not Ball et al.'s formal definitions):
+
+| Criterion | PoW → useful (Ball et al.) | Useful → PoW (ZK-SPoW) |
 |---|---|---|
-| PoW produces useful output | Partial | **Yes**: every Symbiotic permutation advances a STARK proof |
-| Verifier confirms usefulness | Not enforced | **Distinguishable but not enforced**: mode is identifiable via nonce format and mempool proof correlation (§4.4), but consensus does not require it |
-| Useful output bound to PoW | Not enforced | **Architectural + observable**: same permutation produces both; STARK proof in mempool contains `h_H` binding evidence (§4.4) |
+| PoW produces useful output | Partial (efficiency not achieved) | **Yes**: every Symbiotic permutation advances a STARK proof |
+| Verifier confirms usefulness | Not enforced | **Distinguishable but not enforced**: mode identifiable via nonce format and mempool proof correlation (§4.4) |
+| Useful output bound to PoW | Not enforced | **Architectural**: same permutation produces both; STARK proof contains `h_H` binding evidence (§4.4) |
 
 **Mode distinguishability without enforcement.** Blocks do not contain STARK proofs, but the operating mode is *not* indistinguishable. Two mechanisms allow mode identification (§4.4): (1) a nonce format convention that makes Pure PoW blocks identifiable from the header alone, and (2) mempool STARK proofs whose Merkle commitments contain the block's `h_H` as a salt, providing after-the-fact cryptographic evidence of Symbiotic mining. The current design treats these as optional—consensus validity depends only on the PoW hash, and economic incentives (ZK proof revenue) drive Symbiotic adoption. However, these mechanisms mean the protocol *could* enforce or reward useful work in future iterations without modifying the PoW function.
 
-Ball et al.'s hardness results constrain the PoW → useful direction. ZK-SPoW sidesteps these constraints by reversing the direction: useful computation happens to produce PoW-valid outputs as a mathematical byproduct of the same permutation. A miner *could* run Pure PoW mode exclusively, forgoing ZK revenue. The protocol does not enforce useful computation; the evidence infrastructure for mode verification exists (§4.4), but activation is a policy decision.
+A miner *could* run Pure PoW mode exclusively, forgoing ZK revenue. The protocol does not enforce useful computation; the evidence infrastructure for mode verification exists (§4.4), but activation is a policy decision.
 
 ### 8.4 Memorylessness Comparison
 
