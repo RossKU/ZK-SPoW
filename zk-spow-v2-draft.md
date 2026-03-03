@@ -97,9 +97,9 @@ This addresses the challenge of combining useful computation with memoryless PoW
 
 ### 2.1 Computational Progress-Freedom
 
-A PoW scheme is *progress-free* if each trial's success probability is independent of all prior outcomes—i.e., the success events form an i.i.d. Bernoulli($q$) sequence, yielding Poisson block arrivals [Garay et al., 2015]. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
+A PoW scheme is *progress-free* if each trial's success probability is independent of all prior outcomes—i.e., the success events form an i.i.d. Bernoulli($q$) sequence, yielding Poisson block arrivals [16]. SHA-256 and kHeavyHash achieve this information-theoretically under the random oracle model.
 
-Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security: the adversary in these proofs is PPT [Garay et al., 2015; 5], so computational indistinguishability from i.i.d. preserves all security bounds.
+Poseidon2 is not a random oracle, so we use a computational relaxation: a PoW scheme is *computationally progress-free* if no PPT adversary can distinguish the trial outcomes from i.i.d. Bernoulli($q$) with non-negligible advantage. This suffices for Nakamoto consensus security: the adversary in these proofs is PPT [16, 5], so computational indistinguishability from i.i.d. preserves all security bounds.
 
 **Why proof-level PoW fails.** If proof completion is the PoW event, the scheme is not progress-free at any level of assumption: a miner at 80% completion has observably higher conditional success probability than one at 10%.
 
@@ -805,7 +805,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 | 10 | 303.47 | 303.06 | 99.9% | M→R |
 | **Mean** | **305.15 ± 0.91** | **302.99 ± 0.20** | **99.3% ± 0.3%** | |
 
-95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p = 0.006$.
+95% CI for ratio: [99.1%, 99.5%]. Paired $t$-test: $t = -7.893$, $p < 0.001$ ($p \approx 2.5 \times 10^{-5}$, $df = 9$).
 
 **Interpretation.** The difference is statistically significant ($p = 0.006$) but practically negligible (0.7%). The gap is attributable to GPU global memory I/O overhead in the Merkle kernel (16-word read + 8-word write per permutation), not to input-dependent Poseidon2 computation. Poseidon2's 30-round arithmetic dominates execution time regardless of input source. Execution order has no measurable effect. On ASIC (SRAM latency ~1 cycle vs GPU global memory ~hundreds of cycles), this I/O gap is expected to be substantially reduced.
 
@@ -833,7 +833,7 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 
 **Side information.** A miner observes STARK execution state (tree level, NTT progress) in addition to PoW outcomes. Under PRP, this does not help predict future PoW outcomes: $\pi(x_j)$ is pseudorandom regardless of how $x_j$ was generated or what the miner knows about computation progress.
 
-**Consensus sufficiency.** Nakamoto consensus security proofs—chain-based [Garay et al., 2015] and DAG-based [5]—rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. The adversary in both frameworks is PPT, so computational indistinguishability from i.i.d. preserves all security bounds.
+**Consensus sufficiency.** Nakamoto consensus security proofs—chain-based [16] and DAG-based [5]—rely on Poisson block arrivals for selfish-mining bounds and difficulty adjustment convergence. The adversary in both frameworks is PPT, so computational indistinguishability from i.i.d. preserves all security bounds.
 
 ---
 
@@ -868,3 +868,5 @@ This appendix contains the complete proof of Theorem 1 (§2.2) and supporting re
 [14] S. Oleksak, R. Gazdik, M. Peresini, and I. Homoliak, "Zk-SNARK Marketplace with Proof of Useful Work," arXiv:2510.09729, 2025. https://arxiv.org/abs/2510.09729
 
 [15] T. Ashur, T. Buschman, and M. Mahzoun, "Algebraic Cryptanalysis of HADES Design Strategy: Application to POSEIDON and Poseidon2," IACR ePrint 2023/537, 2023. https://eprint.iacr.org/2023/537
+
+[16] J. Garay, A. Kiayias, and N. Leonardos, "The Bitcoin Backbone Protocol: Analysis and Applications," Eurocrypt 2015, LNCS 9057, pp. 281–310, 2015.
