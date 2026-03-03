@@ -604,9 +604,9 @@ ZK-SPoW operates at the finest practical granularity—individual permutations (
 
 ZK-SPoW extracts memoryless PoW at the individual Poseidon2 permutation level within STARK proof generation—each evaluation is computationally indistinguishable from an independent Bernoulli trial under the PRP assumption (Theorem 1), satisfying the Poisson block arrival prerequisite of Nakamoto consensus [5]. Each Poseidon2 Merkle hash simultaneously advances a ZK proof and produces PoW tickets—a dual-purpose output from the same permutation, with near-zero throughput switching overhead between modes.
 
-The approach has clear limitations. The protocol does not enforce useful computation at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.4), and depends entirely on external ZK proof demand (§7). The single-primitive dependency on Poseidon2 and the absence of dedicated compression-function-mode cryptanalysis for Width-24 remain open risks (§9.1).
+Where prior PoUW constructions [1, 8] operate in the direction PoW → useful output—achieving protocol-enforced usefulness at the cost of stateful computation and domain-specific verification—ZK-SPoW reverses the direction: useful computation → PoW output. Operating at permutation granularity (nanoseconds) rather than proof granularity preserves memorylessness and standard PoW verification, but shifts usefulness from protocol-enforced to market-driven.
 
-Despite these limitations, ZK-SPoW demonstrates that useful computation and memoryless PoW are not inherently incompatible at the hardware level—the tension identified in prior PoUW work can be avoided by operating at the permutation granularity rather than the proof granularity.
+The approach has clear limitations. Useful computation is not enforced at the consensus layer—mode distinguishability is achievable (§4.4) but not mandated. System-level usefulness ($U_{sys} \approx 10\text{–}98\%$) is constrained by memory bandwidth (§5.4), and depends entirely on external ZK proof demand—a limitation shared with prior PoUW approaches (§7, §8.3). The single-primitive dependency on Poseidon2 and the absence of Width-24-specific cryptanalysis over M31 remain open risks (§9).
 
 ---
 
