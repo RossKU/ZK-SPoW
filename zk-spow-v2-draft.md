@@ -44,9 +44,9 @@ These works operate in the direction **PoW → useful output**: the mining compu
 
 **ZK-SPoW takes the reverse direction** and prioritizes different properties. Instead of making PoW results useful, we start from useful computation (STARK proof generation) and observe that PoW tickets emerge as a mathematical byproduct. By operating at the granularity of a single Poseidon2 permutation (nanoseconds), each trial is independent with no sunk cost—memorylessness is preserved. Verification remains a standard `hash < target` check. The tradeoff: usefulness is market-driven rather than protocol-enforced:
 
-> **Conventional PoUW:** PoW computation → make results useful → deployment constraints [1, 7, 8, 9]
+> **Conventional PoUW:** PoW computation → make results useful → protocol-enforced usefulness, domain-specific verification [1, 7, 8, 9]
 >
-> **ZK-SPoW:** Useful ZK computation → PoW tickets as mathematical byproduct → different tradeoffs (§8.3)
+> **ZK-SPoW:** Useful ZK computation → PoW tickets as mathematical byproduct → memorylessness, standard verification, market-driven usefulness (§8.3)
 
 More precisely: each Poseidon2 Merkle hash in the STARK prover simultaneously computes a Merkle parent (advancing the ZK proof) and produces PoW tickets (checked against the difficulty target). This dual output is a mathematical consequence of reading the same permutation output for two purposes—not a hardware trick or a protocol mandate. The STARK does not *require* PoW, and the PoW does not *require* the STARK; they coexist because the permutation output serves both roles.
 
