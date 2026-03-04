@@ -821,7 +821,9 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 ### C.3 Output Pseudorandomness
 
-100 sequences $\times$ 1,000,000 bits. Input: $(counter, 0, \ldots, 0) \in \mathbb{F}_p^{24}$, sequential counters ($24 \times 31 = 744$ bits/permutation). $\alpha = 0.01$, pass threshold $\geq 97/100$ (§4.2). Round constants: SplitMix64 (seed `0x5A4B3C2D1E0FA9B8`).
+Poseidon2 Width-24 output under sequential counter inputs passes all 15 NIST SP 800-22 tests, empirically supporting the PRP assumption (Theorem 1).
+
+**Setup.** 100 sequences $\times$ 1,000,000 bits. Input: $(counter, 0, \ldots, 0) \in \mathbb{F}_p^{24}$ ($24 \times 31 = 744$ bits/permutation). $\alpha = 0.01$, pass threshold $\geq 97/100$ (§4.2). Round constants: SplitMix64 (seed `0x5A4B3C2D1E0FA9B8`).
 
 | NIST SP 800-22 Test | Proportion | P-value$_T$ | Result |
 |---|---|---|---|
