@@ -821,9 +821,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 ### C.3 Output Pseudorandomness
 
-**Claim.** Poseidon2 Width-24 output is statistically indistinguishable from random under sequential counter inputs, supporting the PRP assumption (Theorem 1).
-
-**Method.** 100 sequences × 1,000,000 bits each. Input: $(counter, 0, \ldots, 0) \in \mathbb{F}_p^{24}$, sequential counters. Each permutation yields $24 \times 31 = 744$ output bits. Round constants: SplitMix64-derived (seed `0x5A4B3C2D1E0FA9B8`). Poseidon2 implementation ported line-by-line from the reference Rust miner. Pass criterion: $\geq 97/100$ sequences pass at $\alpha = 0.01$ (NIST SP 800-22 §4.2: $\hat{p} - 3\sqrt{\hat{p}(1-\hat{p})/n} \approx 0.96$).
+100 sequences $\times$ 1,000,000 bits. Input: $(counter, 0, \ldots, 0) \in \mathbb{F}_p^{24}$, sequential counters ($24 \times 31 = 744$ bits/permutation). $\alpha = 0.01$, pass threshold $\geq 97/100$ (§4.2). Round constants: SplitMix64 (seed `0x5A4B3C2D1E0FA9B8`).
 
 | NIST SP 800-22 Test | Proportion | P-value$_T$ | Result |
 |---|---|---|---|
@@ -837,7 +835,7 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 | Cumulative Sums (fwd) | 99/100 | 0.2897 | PASS |
 | Cumulative Sums (bwd) | 99/100 | 0.9114 | PASS |
 | Binary Matrix Rank | 98/100 | 0.7197 | PASS |
-| Non-overlapping Template ($m = 9$, 148 templates) | 148/148 pass | 0.0054† | PASS |
+| Non-overlapping Template ($m = 9$, 148) | 148/148 pass | 0.0054† | PASS |
 | Overlapping Template ($m = 9$) | 99/100 | 0.0712 | PASS |
 | DFT (Spectral) | 99/100 | 0.0457 | PASS |
 | Linear Complexity ($M = 500$) | 99/100 | 0.4190 | PASS |
@@ -845,17 +843,15 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 | Random Excursions (8 states) | 8/8 pass | 0.0510† | PASS |
 | Random Excursions Variant (18 states) | 17/18 pass | 0.0320† | PASS |
 
-Proportion: sequences passing at $\alpha = 0.01$ (threshold $\geq 97/100$ per §4.2). P-value$_T$: §4.2.2 uniformity test ($\chi^2$ on 10-bin histogram of per-sequence p-values; pass if $> 0.0001$). †Worst across sub-tests.
+P-value$_T$: §4.2.2 uniformity ($\chi^2$ on 10-bin histogram; pass if $> 0.0001$). †Worst across sub-tests. Non-overlapping Template: $N = 8$, $M = 125{,}000$ per NIST STS 2.1.2. REV state $x = +3$: 53/56 (threshold 54), consistent with 18-state false positive rate ($P \approx 10\%$). Linear Complexity: corrected $\pi_6 = 1/48$ (NIST STS 2.1.2 bug: $\pi_6 = 1/32$, $\sum \pi_i > 1$).
 
-Serial and Cumulative Sums each report two independent p-values per §2.11 and §2.13. Non-overlapping Template tests all 148 aperiodic 9-bit templates independently ($N = 8$ blocks of $M = 125{,}000$ bits per NIST STS 2.1.2); all 148 sub-tests pass. Random Excursions evaluates 8 states ($x \in \{-4,\ldots,-1,+1,\ldots,+4\}$) and Random Excursions Variant evaluates 18 states ($x \in \{-9,\ldots,-1,+1,\ldots,+9\}$) independently; one REV state ($x = +3$: 53/56, threshold 54) falls marginally below, consistent with expected false positive rate across 18 independent sub-tests ($P \approx 10\%$). Linear Complexity uses corrected theoretical probabilities (the NIST STS 2.1.2 reference implementation contains a known bug where $\pi_6 = 1/32$ instead of $1/48$, causing $\sum \pi_i > 1$).
+**Inter-ticket independence** (100,000 permutations, 3 tickets: S[0..7], S[8..15], S[16..23]):
 
-**Inter-ticket independence.** Three tickets per permutation (S[0..7], S[8..15], S[16..23]) were tested for cross-ticket correlation over 100,000 permutations:
+- **XOR Monobit**: all pairs $p > 0.01$ ($p = 0.89, 0.45, 0.33$).
+- **Pearson correlation**: 192 cross-ticket pairs, mean $|r| = 0.0024$, max $|r| = 0.0079$.
+- **Joint success** ($d = 5$): $\chi^2$ $p = 0.97, 0.33, 0.40$.
 
-- **XOR Monobit**: $\text{T}_0 \oplus \text{T}_1$: $p = 0.89$; $\text{T}_0 \oplus \text{T}_2$: $p = 0.45$; $\text{T}_1 \oplus \text{T}_2$: $p = 0.33$. All pass ($p > 0.01$).
-- **Pearson correlation**: 192 cross-ticket element pairs, mean $|r| = 0.0024$, max $|r| = 0.0079$ (expected max for random: $\sim 0.010$).
-- **Joint success** ($d = 5$, $P_\text{single} \approx 1/32$): Observed joint rates match independent expectation ($\chi^2$ $p = 0.97, 0.33, 0.40$ for pairs $(0,1), (0,2), (1,2)$).
-
-**Caveat.** Tested with SplitMix64-derived round constants (the reference implementation's constants). Testing under finalized production Poseidon2 constants would complete validation. Reproducible via `analysis/nist_sp800_22_poseidon2.py` (stdlib-only Python).
+Tested with SplitMix64-derived round constants. Reproducible: `analysis/nist_sp800_22_poseidon2.py`.
 
 ---
 
