@@ -825,27 +825,29 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 
 **Method.** 100 sequences × 1,000,000 bits each. Input: $(counter, 0, \ldots, 0) \in \mathbb{F}_p^{24}$, sequential counters. Each permutation yields $24 \times 31 = 744$ output bits. Round constants: SplitMix64-derived (seed `0x5A4B3C2D1E0FA9B8`). Poseidon2 implementation ported line-by-line from the reference Rust miner. Pass criterion: $\geq 97/100$ sequences pass at $\alpha = 0.01$ (NIST SP 800-22 §4.2: $\hat{p} - 3\sqrt{\hat{p}(1-\hat{p})/n} \approx 0.96$).
 
-| NIST SP 800-22 Test | Pass | Rate |
-|---|---|---|
-| Frequency (Monobit) | 99/100 | 99.0% |
-| Block Frequency | 100/100 | 100.0% |
-| Runs | 97/100 | 97.0% |
-| Longest Run of Ones | 99/100 | 99.0% |
-| Serial $\nabla^2_1$ ($m = 16$) | 99/100 | 99.0% |
-| Serial $\nabla^2_2$ ($m = 16$) | 99/100 | 99.0% |
-| Approximate Entropy ($m = 10$) | 98/100 | 98.0% |
-| Cumulative Sums (fwd) | 99/100 | 99.0% |
-| Cumulative Sums (bwd) | 99/100 | 99.0% |
-| Binary Matrix Rank | 98/100 | 98.0% |
-| Non-overlapping Template ($m = 9$, 148 templates) | 148/148 pass | worst 97.0% |
-| Overlapping Template ($m = 9$) | 99/100 | 99.0% |
-| DFT (Spectral) | 99/100 | 99.0% |
-| Linear Complexity ($M = 500$) | 99/100 | 99.0% |
-| Maurer Universal ($L = 7$) | 98/100 | 98.0% |
-| Random Excursions (8 states) | 8/8 pass | worst 96.4% |
-| Random Excursions Variant (18 states) | 17/18 pass | worst 94.6% |
+| NIST SP 800-22 Test | Proportion | P-value$_T$ | Result |
+|---|---|---|---|
+| Frequency (Monobit) | 99/100 | 0.5544 | PASS |
+| Block Frequency | 100/100 | 0.7981 | PASS |
+| Runs | 97/100 | 0.2622 | PASS |
+| Longest Run of Ones | 99/100 | 0.4559 | PASS |
+| Serial $\nabla^2_1$ ($m = 16$) | 99/100 | 0.9241 | PASS |
+| Serial $\nabla^2_2$ ($m = 16$) | 99/100 | 0.1719 | PASS |
+| Approximate Entropy ($m = 10$) | 98/100 | 0.9988 | PASS |
+| Cumulative Sums (fwd) | 99/100 | 0.2897 | PASS |
+| Cumulative Sums (bwd) | 99/100 | 0.9114 | PASS |
+| Binary Matrix Rank | 98/100 | 0.7197 | PASS |
+| Non-overlapping Template ($m = 9$, 148 templates) | 148/148 pass | 0.0054† | PASS |
+| Overlapping Template ($m = 9$) | 99/100 | 0.0712 | PASS |
+| DFT (Spectral) | 99/100 | 0.0457 | PASS |
+| Linear Complexity ($M = 500$) | 99/100 | 0.4190 | PASS |
+| Maurer Universal ($L = 7$) | 98/100 | 0.1538 | PASS |
+| Random Excursions (8 states) | 8/8 pass | 0.0510† | PASS |
+| Random Excursions Variant (18 states) | 17/18 pass | 0.0320† | PASS |
 
-All 15 tests pass at the NIST §4.2 threshold. Serial and Cumulative Sums each report two independent p-values per §2.11 and §2.13. Non-overlapping Template tests all 148 aperiodic 9-bit templates independently ($N = 8$ blocks of $M = 125{,}000$ bits per NIST STS 2.1.2); all 148 sub-tests pass. Random Excursions evaluates 8 states ($x \in \{-4,\ldots,-1,+1,\ldots,+4\}$) and Random Excursions Variant evaluates 18 states ($x \in \{-9,\ldots,-1,+1,\ldots,+9\}$) independently; one REV state ($x = +3$: 53/56, threshold 54) falls marginally below, consistent with expected false positive rate across 18 independent sub-tests ($P \approx 10\%$). Linear Complexity uses corrected theoretical probabilities (the NIST STS 2.1.2 reference implementation contains a known bug where $\pi_6 = 1/32$ instead of $1/48$, causing $\sum \pi_i > 1$). All sub-tests pass NIST §4.2.2 p-value uniformity ($\chi^2$ on 10-bin histogram, $p > 0.0001$).
+Proportion: sequences passing at $\alpha = 0.01$ (threshold $\geq 97/100$ per §4.2). P-value$_T$: §4.2.2 uniformity test ($\chi^2$ on 10-bin histogram of per-sequence p-values; pass if $> 0.0001$). †Worst across sub-tests.
+
+Serial and Cumulative Sums each report two independent p-values per §2.11 and §2.13. Non-overlapping Template tests all 148 aperiodic 9-bit templates independently ($N = 8$ blocks of $M = 125{,}000$ bits per NIST STS 2.1.2); all 148 sub-tests pass. Random Excursions evaluates 8 states ($x \in \{-4,\ldots,-1,+1,\ldots,+4\}$) and Random Excursions Variant evaluates 18 states ($x \in \{-9,\ldots,-1,+1,\ldots,+9\}$) independently; one REV state ($x = +3$: 53/56, threshold 54) falls marginally below, consistent with expected false positive rate across 18 independent sub-tests ($P \approx 10\%$). Linear Complexity uses corrected theoretical probabilities (the NIST STS 2.1.2 reference implementation contains a known bug where $\pi_6 = 1/32$ instead of $1/48$, causing $\sum \pi_i > 1$).
 
 **Inter-ticket independence.** Three tickets per permutation (S[0..7], S[8..15], S[16..23]) were tested for cross-ticket correlation over 100,000 permutations:
 
