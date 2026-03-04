@@ -570,7 +570,9 @@ def test_nonoverlapping_template(bits, m=9):
     Tests all 148 aperiodic templates of length m=9 (NIST SP 800-22 §2.7).
     Returns dict mapping template index to p-value.
     """
-    M = 1032  # block size recommended for n=10^6, m=9
+    n = len(bits)
+    N = 8  # NIST STS 2.1.2: N=8 blocks
+    M = n // N  # M=125000 for n=10^6
     results = {}
     for idx, template in enumerate(_TEMPLATES_9):
         results[idx] = _nonoverlapping_template_single(bits, template, m, M)
@@ -732,13 +734,19 @@ def test_spectral(bits):
     """Test 11: Discrete Fourier Transform (Spectral).
 
     Detects periodic features indicating deviation from randomness.
-    NIST SP 800-22 §2.6. Uses exact n-point DFT via Bluestein's algorithm.
+    NIST SP 800-22 §2.6. Uses radix-2 FFT with zero-padding to next
+    power of 2 (same method as NIST STS 2.1.2 reference implementation).
     """
     n = len(bits)
-    x_real = [float(2 * b - 1) for b in bits]
-    real_a, imag_a = _bluestein_dft(x_real, n)
+    # Pad to next power of 2 (as in NIST STS 2.1.2)
+    m = 1
+    while m < n:
+        m <<= 1
+    real_a = [float(2 * b - 1) for b in bits] + [0.0] * (m - n)
+    imag_a = [0.0] * m
+    _fft_inplace(real_a, imag_a)
 
-    # Count peaks below threshold
+    # Count peaks below threshold (using original n)
     T = math.sqrt(math.log(1.0 / 0.05) * n)
     N1 = 0
     for i in range(n // 2):

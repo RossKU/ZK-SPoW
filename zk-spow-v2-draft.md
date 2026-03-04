@@ -600,7 +600,7 @@ ZK-SPoW operates at the finest practical granularity—individual permutations (
 
 2. **Memoryless validation.** Empirical verification of Poisson block inter-arrival times in a test network running ZK-SPoW would complement the theoretical analysis of §2.
 
-3. **Output quality under production constants.** Appendix C.3 reports NIST SP 800-22 results under the reference implementation's round constants (SplitMix64-derived): all 15 tests pass at the $\geq 97/100$ threshold, and inter-ticket independence holds across all three correlation measures. Testing under finalized production Poseidon2 constants would complete validation.
+3. **Output quality under production constants.** Appendix C.3 reports NIST SP 800-22 results under the reference implementation's round constants (SplitMix64-derived): all 15 tests pass at the §4.2 threshold with per-sub-test evaluation (148 Non-overlapping Template sub-tests, 8 Random Excursions states, 18 Random Excursions Variant states, and independent Serial/Cumulative Sums p-values), and inter-ticket independence holds across all three correlation measures. Testing under finalized production Poseidon2 constants would complete validation.
 
 4. **ZK demand viability.** §7 derives the equilibrium condition and demand scarcity risk. The critical open question is whether sustained ZK proof demand at sufficient scale will materialize. A dynamic simulation of ZK-SPoW vs Pure PoW ASIC competition under stochastic ZK demand—including miner entry/exit dynamics and difficulty adjustment feedback—would quantify the collapse threshold more precisely. The source of demand (who buys proofs, and why ZK-SPoW miners are preferred over dedicated proving services) remains unaddressed.
 
@@ -831,19 +831,21 @@ Peak throughput: 136.39M PoW tickets/s at $\ell = 20$. At $\ell = 22$, STARK ove
 | Block Frequency | 100/100 | 100.0% |
 | Runs | 97/100 | 97.0% |
 | Longest Run of Ones | 99/100 | 99.0% |
-| Serial ($m = 16$) | 98/100 | 98.0% |
+| Serial $\nabla^2_1$ ($m = 16$) | 99/100 | 99.0% |
+| Serial $\nabla^2_2$ ($m = 16$) | 99/100 | 99.0% |
 | Approximate Entropy ($m = 10$) | 98/100 | 98.0% |
-| Cumulative Sums | 99/100 | 99.0% |
+| Cumulative Sums (fwd) | 99/100 | 99.0% |
+| Cumulative Sums (bwd) | 99/100 | 99.0% |
 | Binary Matrix Rank | 98/100 | 98.0% |
-| Non-overlapping Template ($m = 9$) | 100/100 | 100.0% |
+| Non-overlapping Template ($m = 9$, 148 templates) | 148/148 pass | worst 97.0% |
 | Overlapping Template ($m = 9$) | 99/100 | 99.0% |
 | DFT (Spectral) | 99/100 | 99.0% |
 | Linear Complexity ($M = 500$) | 99/100 | 99.0% |
 | Maurer Universal ($L = 7$) | 98/100 | 98.0% |
-| Random Excursions (Šidák-corrected) | 55/56 | 98.2% |
-| Random Excursions Variant (Šidák-corrected) | 55/56 | 98.2% |
+| Random Excursions (8 states) | 8/8 pass | worst 96.4% |
+| Random Excursions Variant (18 states) | 17/18 pass | worst 94.6% |
 
-All 15 tests pass at the $\geq 97/100$ threshold ($\geq 96\%$ for Random Excursions with 56 applicable sequences). Random Excursions tests apply Šidák correction for multi-state aggregation (8 and 18 states respectively). Linear Complexity uses corrected theoretical probabilities (the NIST STS 2.1.2 reference implementation contains a known bug where $\pi_6 = 1/32$ instead of $1/48$, causing $\sum \pi_i > 1$).
+All 15 tests pass at the NIST §4.2 threshold. Serial and Cumulative Sums each report two independent p-values per §2.11 and §2.13. Non-overlapping Template tests all 148 aperiodic 9-bit templates independently ($N = 8$ blocks of $M = 125{,}000$ bits per NIST STS 2.1.2); all 148 sub-tests pass. Random Excursions evaluates 8 states ($x \in \{-4,\ldots,-1,+1,\ldots,+4\}$) and Random Excursions Variant evaluates 18 states ($x \in \{-9,\ldots,-1,+1,\ldots,+9\}$) independently; one REV state ($x = +3$: 53/56, threshold 54) falls marginally below, consistent with expected false positive rate across 18 independent sub-tests ($P \approx 10\%$). Linear Complexity uses corrected theoretical probabilities (the NIST STS 2.1.2 reference implementation contains a known bug where $\pi_6 = 1/32$ instead of $1/48$, causing $\sum \pi_i > 1$). All sub-tests pass NIST §4.2.2 p-value uniformity ($\chi^2$ on 10-bin histogram, $p > 0.0001$).
 
 **Inter-ticket independence.** Three tickets per permutation (S[0..7], S[8..15], S[16..23]) were tested for cross-ticket correlation over 100,000 permutations:
 
