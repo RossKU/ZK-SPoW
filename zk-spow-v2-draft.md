@@ -12,7 +12,7 @@ Proof-of-work (PoW) blockchains expend energy solely for network security. Proof
 
 **ZK-SPoW** (ZK-Symbiotic Proof of Work) inverts the PoUW relationship: instead of making PoW useful, useful STARK Merkle hashing naturally produces PoW tickets as a cryptographic byproduct of every Poseidon2 permutation. Under the pseudorandom permutation (PRP) assumption, each permutation is computationally indistinguishable from an independent Bernoulli trial at nanosecond granularity—resolving the non-memoryless problem without sacrificing useful computation. Losing miners' ZK work remains useful regardless of PoW outcome.
 
-We instantiate with Width-24 Poseidon2 over M31: each permutation simultaneously produces a Merkle parent (ZK output) and three PoW tickets. Usefulness is not protocol-enforced but market-driven—it requires external proof demand; absent demand, the system operates as conventional PoW (§7). Security claims assume PRP of the full-round permutation; GPU throughput measurements (Appendix C) validate implementation overhead, not cryptographic strength.
+We instantiate with Width-24 Poseidon2 over M31: each permutation simultaneously produces a Merkle parent (ZK output) and three PoW tickets. Usefulness is not protocol-enforced but market-driven—it requires external proof demand; absent demand, the system operates as conventional PoW (§7).
 
 ---
 
